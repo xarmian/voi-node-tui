@@ -52,7 +52,7 @@ type Model struct {
 	message                       string
 	netErr, waitErr               string
 	uri, qr                       string
-	networkWarning                string
+	uriOffline, incentive         bool
 	input                         textinput.Model
 	address                       string
 	target                        algod.ParticipationKey

@@ -34,14 +34,19 @@ func (m *Model) showURI(offline, qr bool) bool {
 			p.VoteFirstValid, p.VoteLastValid = m.shown(p.VoteFirstValid), m.shown(p.VoteLastValid)
 		}
 	}
-	uri, warning, err := arc90.Build(m.version.GenesisID, a.Address, p, offline)
+	net, _ := arc90.Lookup(m.version.GenesisID)
+	var fee uint64
+	if m.incentive && net.Algorand && !offline {
+		fee = arc90.IncentiveFee
+	}
+	uri, err := arc90.Build(m.version.GenesisID, a.Address, p, offline, fee)
 	if err != nil {
 		m.message = err.Error()
 		return false
 	}
 	m.resetScroll()
 	m.uri = uri
-	m.networkWarning = warning
+	m.uriOffline = offline
 	m.qr = ""
 	m.mode = "uri"
 	if qr {
@@ -51,7 +56,10 @@ func (m *Model) showURI(offline, qr bool) bool {
 		m.qr = b.String()
 		m.mode = "qr"
 	}
-	m.message = "Sign this URI in Voi Wallet or paste it into voirewards. No spending keys are held here."
+	m.message = "Sign this URI in " + net.Wallet + ". No spending keys are held here."
+	if net.Unit == "VOI" {
+		m.message = "Sign this URI in Voi Wallet or paste it into voirewards. No spending keys are held here."
+	}
 	if offline {
 		m.message = "Offline keyreg: signing this URI marks the account Offline."
 	}
@@ -109,6 +117,17 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		if s == "c" {
 			m.message = "OSC 52 copy requested; URI remains below for manual copy."
 			return clipboard(m.uri)
+		}
+		if s == "f" {
+			if net, _ := arc90.Lookup(m.version.GenesisID); net.Algorand && !m.uriOffline {
+				m.incentive = !m.incentive
+				m.showURI(false, m.mode == "qr")
+				if m.incentive {
+					m.message = "Added the 2 ALGO fee that requests participation incentives; the wallet shows it before signing."
+				} else {
+					m.message = "Removed the incentive fee; the wallet picks the fee."
+				}
+			}
 		}
 		return nil
 	}

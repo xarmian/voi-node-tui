@@ -40,9 +40,6 @@ var (
 	sColHead  = lipgloss.NewStyle().Foreground(cDim).Bold(true)
 	sKeycap   = lipgloss.NewStyle().Foreground(cText).Background(cTrack).Padding(0, 1)
 	sKeyLabel = lipgloss.NewStyle().Foreground(cMuted)
-
-	// Kept for the network-mismatch notice above a QR.
-	warningStyle = sWarn.Bold(true)
 )
 
 func pill(text string, bg lipgloss.Color) string {

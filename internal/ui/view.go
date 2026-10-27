@@ -11,6 +11,7 @@ import (
 
 	"github.com/xarmian/voi-node-tui/internal/accounts"
 	"github.com/xarmian/voi-node-tui/internal/algod"
+	"github.com/xarmian/voi-node-tui/internal/arc90"
 )
 
 func clean(s string) string {
@@ -60,6 +61,14 @@ func (m *Model) health() (string, lipgloss.Color) {
 	return "● HEALTHY", cOK
 }
 
+// network describes the connected chain; an unknown genesis gets neutral wording.
+func (m *Model) network() arc90.Network {
+	if n, ok := arc90.Lookup(m.version.GenesisID); ok {
+		return n
+	}
+	return arc90.Network{Name: "unknown network", Unit: "units", Wallet: "a wallet"}
+}
+
 func (m *Model) header() string {
 	w := max(20, m.width)
 	network := clean(m.version.GenesisID)
@@ -97,7 +106,7 @@ func (m *Model) header() string {
 	}
 	right := ""
 	if m.supply.OnlineMoney > 0 {
-		right = sMuted.Render("network online ") + sText.Render(compactVOI(m.supply.OnlineMoney)+" VOI")
+		right = sMuted.Render("network online ") + sText.Render(compactVOI(m.supply.OnlineMoney)+" "+m.network().Unit)
 	}
 	lines := []string{line1, spread(block, right, w-4)}
 	if m.status.CatchupTime > 0 || m.status.Catchpoint != "" {
@@ -138,6 +147,9 @@ func (m *Model) hints() string {
 		h = keycaps("↑↓", "account", "←→", "key", "⏎", "qr", "c", "copy", "o", "offline", "g", "renew", "a", "add", "d", "delete", "?", "help", "^C", "quit")
 	case "qr", "uri":
 		h = keycaps("c", "copy uri", "esc", "back", "PgUp/PgDn", "scroll", "^C", "quit")
+		if m.network().Algorand && !m.uriOffline {
+			h = keycaps("c", "copy uri", "f", "incentive fee", "esc", "back", "^C", "quit")
+		}
 	case "help":
 		h = keycaps("esc", "back", "PgUp/PgDn", "scroll", "^C", "quit")
 	default:
@@ -207,17 +219,22 @@ func (m *Model) dialog(w int) string {
 // qrView fits the QR into avail rows, shedding the URI text and then the title before
 // giving up on the QR; the URI is always one keypress (c) away.
 func (m *Model) qrView(w, avail int) string {
-	title := "Scan with Voi Wallet to register this key"
-	if strings.HasSuffix(m.uri, "?type=keyreg") {
-		title = "Scan with Voi Wallet to take this account offline"
+	wallet := m.network().Wallet
+	title := "Scan with " + wallet + " to register this key"
+	if m.uriOffline {
+		title = "Scan with " + wallet + " to take this account offline"
 	}
 	head := lipgloss.PlaceHorizontal(w, lipgloss.Center, sSection.Render(title))
 	if a := m.current(); a != nil {
 		head += "\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, sMuted.Render(a.Address))
 	}
 	warn := ""
-	if m.networkWarning != "" {
-		warn = warningStyle.Render(ansi.Hardwrap("WARNING: "+strings.TrimPrefix(m.networkWarning, "WARNING: "), w, false)) + "\n"
+	if net, _ := arc90.Lookup(m.version.GenesisID); net.Algorand && !m.uriOffline {
+		state := sMuted.Render("incentive fee ") + sDim.Render("off") + sMuted.Render(" · press ") + sKeycap.Render("f") + sMuted.Render(" to add the 2 ALGO fee that requests participation incentives")
+		if m.incentive {
+			state = sMuted.Render("incentive fee ") + sOK.Render("2 ALGO") + sMuted.Render(" · press ") + sKeycap.Render("f") + sMuted.Render(" to remove it")
+		}
+		warn = lipgloss.PlaceHorizontal(w, lipgloss.Center, state) + "\n"
 	}
 	uri := sDim.Render(ansi.Hardwrap(m.uri, w, false))
 	if m.qr == "" {
@@ -307,7 +324,7 @@ func (m *Model) tiles(w int) string {
 	}
 	ts := []tile{
 		{"ONLINE", onlineValue, dots},
-		{"STAKE", sBold.Render(compactVOI(stake) + " VOI"), stakeSub},
+		{"STAKE", sBold.Render(compactVOI(stake) + " " + m.network().Unit), stakeSub},
 		{"EXPECTED PROPOSALS", propValue, propSub},
 		{"NEXT KEY EXPIRY", expValue, expSub},
 	}
@@ -458,7 +475,7 @@ func (m *Model) detail(w int) string {
 	if a.IncentiveEligible {
 		incentive = sOK.Render("✓ incentive eligible")
 	}
-	facts := []string{sMuted.Render("balance ") + sText.Render(exactVOI(a.Amount)+" VOI"), status, incentive}
+	facts := []string{sMuted.Render("balance ") + sText.Render(exactVOI(a.Amount)+" "+m.network().Unit), status, incentive}
 	if m.supply.OnlineMoney > 0 && a.Status == "Online" {
 		share := float64(a.Amount) / float64(m.supply.OnlineMoney)
 		facts = append(facts, sCyan.Render(fmt.Sprintf("%.4f%%", share*100))+sMuted.Render(" of online stake"))
@@ -555,6 +572,8 @@ requires typing its full account address; deleting it stops voting.
 Generation waits up to 20 minutes. Esc on the dashboard offers to abandon the wait;
 abandoning does not cancel generation inside algod.
 Read-only mode blocks all node and watch-list writes.
-QRs are signed externally in Voi Wallet or pasted into voirewards.
+QRs are signed externally: on Voi in Voi Wallet or voirewards, on Algorand in any
+wallet that supports ARC-90 keyreg URIs. On Algorand, f in the QR view adds the
+2 ALGO fee that requests participation incentives.
 This node holds no spending keys, mnemonics, or signing capability.
 Network errors stay in the status line; reads retry automatically. Writes do not.`

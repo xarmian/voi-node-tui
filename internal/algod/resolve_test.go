@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,5 +97,37 @@ func TestResolutionOrder(t *testing.T) {
 	}
 	if _, err = Resolve(context.Background(), Options{URL: "http://x", Token: "a", TokenFile: "/flagtoken"}, s); err == nil {
 		t.Fatal("conflicting credentials")
+	}
+}
+
+type noDocker struct{ *fakeSystem }
+
+func (noDocker) Inspect(context.Context, string) (string, error) { return "", errors.New("no docker") }
+
+func TestStandardInstallFallback(t *testing.T) {
+	pkg := noDocker{&fakeSystem{env: map[string]string{"HOME": "/home/u"}, files: map[string]string{
+		"/var/lib/algorand/algod.net":         "127.0.0.1:8080\n",
+		"/var/lib/algorand/algod.admin.token": "pkgtoken\n",
+	}}}
+	c, err := Resolve(context.Background(), Options{}, pkg)
+	if err != nil || c.URL != "http://127.0.0.1:8080" || c.Token != "pkgtoken" {
+		t.Fatalf("package install: %v %v", c.URL, err)
+	}
+
+	updater := noDocker{&fakeSystem{env: map[string]string{"HOME": "/home/u"}, files: map[string]string{
+		"/home/u/node/data/algod.net":         "[::]:4001",
+		"/home/u/node/data/algod.admin.token": "updtoken",
+	}}}
+	c, err = Resolve(context.Background(), Options{}, updater)
+	if err != nil || c.URL != "http://127.0.0.1:4001" || c.Token != "updtoken" {
+		t.Fatalf("updater install: %v %v", c.URL, err)
+	}
+
+	noToken := noDocker{&fakeSystem{env: map[string]string{}, files: map[string]string{
+		"/var/lib/algorand/algod.net": "127.0.0.1:8080",
+	}}}
+	_, err = Resolve(context.Background(), Options{}, noToken)
+	if err == nil || !strings.Contains(err.Error(), "/var/lib/algorand") || !strings.Contains(err.Error(), "admin") {
+		t.Fatalf("unreadable token should name the directory and the admin token: %v", err)
 	}
 }

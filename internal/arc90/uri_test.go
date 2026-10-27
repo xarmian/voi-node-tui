@@ -35,20 +35,32 @@ func TestGolden(t *testing.T) {
 			if !tc.proof {
 				p.StateProofKey = nil
 			}
-			got, warn, err := Build("voitest-v1.1", k.Address, p, tc.offline)
-			if err != nil || warn != "" || got != tc.want {
-				t.Fatalf("got %q warning %q error %v; want %q", got, warn, err, tc.want)
+			got, err := Build("voitest-v1.1", k.Address, p, tc.offline, 0)
+			if err != nil || got != tc.want {
+				t.Fatalf("got %q error %v; want %q", got, err, tc.want)
 			}
 		})
 	}
-	got, warn, err := Build("", k.Address, k.Key, true)
-	if err != nil || warn == "" || got != "voi://net:voimain-v1.0/"+k.Address+"?type=keyreg" {
-		t.Fatalf("fallback: %s %s %v", got, warn, err)
+	if _, err := Build("", k.Address, k.Key, true, 0); err == nil {
+		t.Fatal("unknown network must be refused, not guessed")
 	}
-	for _, net := range []string{"voimain-v1.0", "voibeta-v1.0"} {
-		_, warn, err := Build(net, k.Address, k.Key, false)
-		if err != nil || warn != "" {
-			t.Fatal(net, warn, err)
+	if _, err := Build("voimain-v1.0", k.Address, k.Key, false, IncentiveFee); err == nil {
+		t.Fatal("fee must be refused on Voi")
+	}
+	for net, want := range map[string]string{
+		"voimain-v1.0": "voi://net:voimain-v1.0/" + k.Address + "?type=keyreg",
+		"voibeta-v1.0": "voi://net:voibeta-v1.0/" + k.Address + "?type=keyreg",
+		"mainnet-v1.0": "algorand://" + k.Address + "?type=keyreg",
+		"testnet-v1.0": "algorand://net:testnet/" + k.Address + "?type=keyreg",
+		"betanet-v1.0": "algorand://net:betanet/" + k.Address + "?type=keyreg",
+	} {
+		got, err := Build(net, k.Address, k.Key, true, 0)
+		if err != nil || got != want {
+			t.Fatalf("%s: got %q %v; want %q", net, got, err, want)
 		}
+	}
+	got, err := Build("mainnet-v1.0", k.Address, k.Key, false, IncentiveFee)
+	if err != nil || got != "algorand://"+k.Address+"?type=keyreg"+keys+"&sprfkey=-_8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"+suffix+"&fee=2000000" {
+		t.Fatalf("algorand fee URI: %q %v", got, err)
 	}
 }

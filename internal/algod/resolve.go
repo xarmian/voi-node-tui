@@ -104,6 +104,20 @@ func Resolve(ctx context.Context, o Options, s System) (Connection, error) {
 			return fromDir(swarmDir, ip, s)
 		}
 	}
+	// Standard installs: the Debian/RPM package, then the updater script's default.
+	dirs := []string{"/var/lib/algorand"}
+	if home := s.Getenv("HOME"); home != "" {
+		dirs = append(dirs, filepath.Join(home, "node", "data"))
+	}
+	for _, d := range dirs {
+		if _, err := s.ReadFile(filepath.Join(d, "algod.net")); err == nil {
+			c, err := fromDir(d, "", s)
+			if err != nil {
+				return Connection{}, fmt.Errorf("found algod data at %s but %w (run as the node's user, or pass --token-file)", d, err)
+			}
+			return c, nil
+		}
+	}
 	return Connection{}, errors.New("algod not found; provide connection flags, environment, or --data-dir")
 }
 func fromDir(dir, override string, s System) (Connection, error) {

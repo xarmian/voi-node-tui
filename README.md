@@ -1,109 +1,186 @@
 # voi-node-tui
 
-`vnode` is an SSH-friendly dashboard for a Voi participation node. It shows live
-rounds, sync health, participation accounts, and local keys. It can generate and
-delete participation keys; registration is signed separately in a wallet.
+`vnode` is a terminal dashboard for an algod participation node on **Voi** or
+**Algorand**. It shows the live chain, your participation accounts and their keys,
+and lets you generate, renew and delete participation keys. Registering a key
+on-chain is always signed elsewhere: `vnode` shows an ARC-90 keyreg QR code and
+URI that you sign in a wallet. The node never holds spending keys.
 
-## Build and install
+It's a single static binary that you run over SSH on the node host.
 
-Requires Go 1.26. Build a static Linux amd64 binary locally, then copy it to your
-node host (no Go installation needed there):
+## What it shows
+
+- **Header:** the network, algod version and node health (healthy, catching up,
+  stalled, connection error). It also shows the current block with a pulse that
+  flashes on each new block, the average block time with a sparkline of recent
+  blocks, and the stake online across the whole network.
+- **Summary tiles:** accounts online, their combined stake and share of online
+  stake, expected block proposals per day, and the soonest key expiry.
+- **Accounts:** one row per participation account. Each row has a status icon, a
+  balance, a key-life gauge (green, then amber under 30 days, then red under 14),
+  the time until the registered key expires, the last vote ("live" while it's
+  voting) and the last proposal.
+- **Account detail:** the full address, exact balance, online status, incentive
+  eligibility, share of online stake, expected blocks per day, any warnings, and
+  every local participation key. The key registered on-chain is marked
+  REGISTERED.
+
+Warnings flag an Online account with no matching local key (it's missing votes),
+a registered key within 14 days of expiry, and an Online account whose
+registered key has already expired.
+
+Dates are estimates. The block time is averaged over the last 1,000 blocks'
+timestamps and refreshed every 10 minutes.
+
+## Install
+
+Build locally with Go 1.26 and copy the binary to the node. The node itself needs
+no Go toolchain.
 
 ```sh
-make build
-file bin/vnode
-scp bin/vnode your-node:~/vnode
-ssh -t your-node './vnode --read-only'
+make build            # bin/vnode, static linux/amd64
+make build-arm64      # bin/vnode-arm64, static linux/arm64 (e.g. Raspberry Pi)
+scp bin/vnode node:~/bin/vnode
+ssh -t node '~/bin/vnode --read-only'
 ```
 
-Run over an interactive SSH terminal as a user who can read the admin token.
-For Voi Swarm autodetection, that user also needs permission to run `docker
-inspect`. The app only inspects metadata; it never starts containers or runs
-commands inside them. Remove `--read-only` when you want to manage keys.
+Run it as a user who can read the node's **admin** token. The participation-key
+endpoints, including listing keys, require it. Start with `--read-only` and drop
+it when you want to manage keys.
 
-### Screenshots
+## Finding the node
 
-`./vnode --redact` shows your live node with everything that could be looked up
-on-chain disguised: addresses, participation keys and key ids become keyed
-hashes, balances are scaled per account, labels are hidden, and every round on
-screen (the block number, key validity ranges, the QR's `votefst`/`votelst`) is
-shifted by a random offset. The disguise changes each run. `--redact` implies
-`--read-only`.
+The first source that is configured wins. A half-configured source (a URL with no
+token, for example) is an error. It never falls through to a different node.
 
-## Connection and flags
-
-The first configured source wins. A partial explicit source fails with an error
-rather than silently connecting to a different node.
-
-1. `--algod-url` plus either `--token` or `--token-file` (mutually exclusive).
-2. `ALGOD_URL` plus `ALGOD_TOKEN`.
-3. `--data-dir`, or `ALGORAND_DATA`: reads `algod.net` and `algod.admin.token`.
-   Wildcard `[::]` and `0.0.0.0` listeners resolve to `127.0.0.1`.
-4. Voi Swarm: inspect `voinetwork_algod`, then `voinetwork_relay`,
-   `voinetwork_developer`, `voinetwork_archiver`. Use its default bridge IP and
-   read the port and admin token from `/var/lib/voi/algod/data/`.
+1. **Flags:** `--algod-url` plus `--token-file` (preferred) or `--token`.
+2. **Environment:** `ALGOD_URL` plus `ALGOD_TOKEN`.
+3. **Data directory:** `--data-dir` or `$ALGORAND_DATA`. It reads `algod.net` and
+   `algod.admin.token`, and a wildcard listener (`[::]`, `0.0.0.0`) is reached at
+   `127.0.0.1`.
+4. **Voi Swarm:** `docker inspect` on `voinetwork_algod`, then the `_relay`,
+   `_developer` and `_archiver` variants. It uses the container's IP (Docker's
+   default bridge, or else the first network that has one), because Swarm doesn't
+   publish algod's port on the host. The port and admin token come from
+   `/var/lib/voi/algod/data/`. It only reads container metadata and never runs
+   anything inside the container.
+5. **Standard Algorand installs:** `/var/lib/algorand` (the Debian/RPM package),
+   then `~/node/data` (the updater script). If algod is found there but its admin
+   token is unreadable, `vnode` names the directory and stops. Run it as the
+   node's user (often `algorand`), or pass `--token-file`.
 
 ```sh
-./vnode --algod-url http://127.0.0.1:8080 --token-file /path/to/algod.admin.token
-./vnode --data-dir /path/to/algod/data --read-only
-./vnode --help
+vnode                                          # autodetect
+vnode --data-dir /var/lib/algorand
+vnode --algod-url http://127.0.0.1:8080 --token-file ~/algod.admin.token
 ```
 
 | Flag | Meaning |
 | --- | --- |
-| `--algod-url` | HTTP(S) algod endpoint; requires an explicit token option |
-| `--token-file` | Admin-token file (preferred) |
-| `--token` | Admin token; may be visible in shell history and process lists |
-| `--data-dir` | Directory containing `algod.net` and `algod.admin.token` |
-| `--read-only` | Disable **all** node and watch-list writes |
+| `--algod-url` | algod HTTP(S) endpoint; needs a token option |
+| `--token-file` | file holding the admin token (preferred) |
+| `--token` | admin token inline; visible in shell history and process lists |
+| `--data-dir` | algod data directory (`algod.net`, `algod.admin.token`) |
+| `--read-only` | disable every write: key generation and deletion, watch-list edits |
+| `--redact` | screenshot mode (see below); implies `--read-only` |
 
-The admin token is needed for participation endpoints, including listing keys.
-Tokens and server response bodies are never printed or logged. Redirects are
-rejected to keep credentials at the configured endpoint.
+The token is never printed or logged. Requests go straight to algod: HTTP proxy
+settings are ignored and redirects are refused, so the token can't leave the
+configured endpoint.
 
-## Keys and workflow
+## Networks
+
+The network comes from algod's genesis ID.
+
+| Genesis ID | Network | Keyreg URI prefix | Units |
+| --- | --- | --- | --- |
+| `voimain-v1.0` | Voi MainNet | `voi://net:voimain-v1.0/` | VOI |
+| `voitest-v1.1` | Voi TestNet | `voi://net:voitest-v1.1/` | VOI |
+| `voibeta-v1.0` | Voi BetaNet | `voi://net:voibeta-v1.0/` | VOI |
+| `mainnet-v1.0` | Algorand MainNet | `algorand://` | ALGO |
+| `testnet-v1.0` | Algorand TestNet | `algorand://net:testnet/` | ALGO |
+| `betanet-v1.0` | Algorand BetaNet | `algorand://net:betanet/` | ALGO |
+
+On Algorand this follows [ARC-90](https://github.com/algorandfoundation/ARCs/blob/main/ARCs/arc-0090.md):
+MainNet omits the network authority and other networks use their alias. Voi
+wallets address the network by genesis ID, and the format matches Voi Swarm's
+`show-partkey-qr`.
+
+On any **other** network, `vnode` still shows the dashboard but refuses to build a
+keyreg URI. A key registered on the wrong chain takes that account online there
+with keys no node is voting with, so the account gets suspended for missing
+votes.
+
+**Algorand incentives.** On Algorand, press `f` in the QR view to add the
+2 ALGO fee (`fee=2000000`) that requests participation incentives on a keyreg. It
+is off by default, so you never pay it by surprise, and your wallet shows the fee
+before you sign. Voi never gets this option.
+
+## Keys
 
 | Key | Action |
 | --- | --- |
-| Up/Down or `j`/`k` | Select account; full address appears below the table |
-| Left/Right or `[`/`]` | Select a local participation key |
-| `h` / `l` | Pan wide account tables left/right |
-| PageUp/PageDown, Home/End | Scroll details and help |
-| `a` | Add checksum-validated address and optional label; offer generation |
-| `g` | Generate/renew; edit validity span, then confirm with `y` |
-| `q` or Enter | Selected key's QR with ARC-90 URI beneath it |
-| `c` | Copy URI via OSC 52 and print it for manual copy |
-| `o` | Offline keyreg QR (no participation keys) |
-| `d` | Delete selected key with the required confirmation |
-| `r` | Remove watch-list entry; offer individually confirmed key deletions |
-| `R` | Refresh everything |
-| `?` | Help |
-| Esc | Close a screen/prompt; cancel remaining queued deletions |
-| Ctrl+C | Quit |
+| `↑`/`↓`, `j`/`k` | select an account |
+| `←`/`→`, `[`/`]` | select one of its participation keys |
+| Enter or `q` | registration QR and URI for the selected key |
+| `c` | copy the URI (OSC 52) and show it |
+| `o` | go-offline QR for the account (a keyreg with no keys) |
+| `f` | in the QR view on Algorand: toggle the incentive fee |
+| `g` | generate or renew a key; edit the round span, then confirm |
+| `a` | add an address (checksum-validated) with an optional label |
+| `d` | delete the selected key |
+| `r` | remove an address from the watch list |
+| `R` | refresh everything |
+| `h`/`l`, PgUp/PgDn, Home/End | pan and scroll |
+| `?` | help |
+| Esc | close a screen, cancel a prompt, or offer to abandon a generation wait |
+| Ctrl+C | quit |
 
-`q` shows a QR; it does not quit. In QR/URI screens, `c` copies the displayed URI,
-including an offline URI. OSC 52 requires terminal support/permission and may
-need configuration in tmux/screen; the URI is also displayed for manual copy.
-Resize the terminal if the complete QR does not fit. QR pixels use explicit
-black/white colors and a quiet zone, independent of the terminal theme.
+`q` opens the QR. It does not quit.
 
-Generation starts at the current displayed round and defaults to a span of
-5,000,000 rounds. Dilution is omitted so algod chooses it. After confirmation,
-the app polls for a new key ID with the requested address and range. This can
-take minutes; there is no fabricated percentage and writes are never retried
-automatically. If a request fails, inspect/refresh keys before retrying. Leaving
-the app does not cancel generation already accepted by algod.
+## Registering a key
 
-Scan the QR in Voi Wallet or paste the URI into voirewards to sign registration.
-Generating a key alone does **not** register it online. The network label comes
-from `/versions`: `voimain-v1.0`, `voitest-v1.1`, or `voibeta-v1.0`. An unknown
-genesis ID falls back to `voimain-v1.0` with a visible warning; verify the network
-before signing. State-proof keys are included when present, and all public keys
-use unpadded base64url. An offline URI has only `?type=keyreg`.
+1. **Generate:** press `g`. The key starts at the current round and spans 5,000,000
+   rounds by default (about 160 days at 2.8 s blocks), editable before you
+   confirm. algod chooses the dilution. Generation runs inside algod and can take
+   minutes. `vnode` polls until the new key appears, for up to 20 minutes, and
+   Esc offers to stop waiting (generation inside algod carries on).
+2. **Register:** select the key and press Enter. Scan the QR with Voi Wallet (or
+   paste the URI into voirewards) on Voi, or with a wallet that supports ARC-90
+   keyreg URIs on Algorand. **Generating a key does not register it.** Until the
+   keyreg is signed and confirmed, the account keeps voting with its old key, or
+   not at all.
+3. **Retire the old key:** once the new key shows REGISTERED, delete the old one.
 
-Accounts are the union of local participation-key addresses and the watch list
-at `~/.config/vnode/accounts.json`. Adding an existing address updates its label.
-The list is saved atomically with private file permissions:
+The QR needs about 40 terminal rows. When space is tight the URI text is dropped
+first (`c` still copies it), then the title. If the QR can't fit at all, the view
+says exactly how many columns and rows it needs. QR modules are drawn in explicit
+black on white, so it scans on light and dark themes.
+
+## Safety
+
+- **Confirmation:** every generation and deletion needs explicit confirmation.
+  Deleting the key an **Online** account is registered with needs its full address
+  typed, and warns that the node will stop voting for it. The account is
+  re-fetched from the chain just before the delete, so stale screen state can't
+  bypass the check.
+- **Deleting a key** does not take the account offline. Use `o` and sign the
+  go-offline URI for that.
+- **`--read-only`** blocks every write. Viewing and copying URIs still works,
+  because building them writes nothing.
+- **Retries:** reads retry automatically and errors stay in the status line.
+  Writes are never retried automatically.
+- **Out of scope:** no spending keys, mnemonics, kmd wallets, signing, automatic
+  renewal, or relay and telemetry settings.
+
+## Watch list
+
+Accounts are the union of addresses that have a local participation key and
+those on the watch list at `~/.config/vnode/accounts.json`. Add an address with
+`a` before generating its first key. Removing an address that still has keys
+leaves it visible, and `r` offers to delete those keys one at a time. The file is
+written atomically with owner-only permissions. A corrupt file is reported, never
+overwritten.
 
 ```json
 [
@@ -111,52 +188,38 @@ The list is saved atomically with private file permissions:
 ]
 ```
 
-The example is the checksum-valid zero address, for illustration only. An account
-with keys remains visible after removal from the watch list. Corrupt watch-list
-files cause an error and are never silently overwritten.
+## Screenshots: `--redact`
 
-Registered keys match the on-chain vote public key. The table shows balance,
-on-chain status, incentive eligibility, registered key/range, remaining rounds,
-estimated UTC expiry, last vote, and last proposal. Details show every local
-key's dilution, effective range, and last vote/proposal/state-proof rounds.
-Expiry estimates use up to 20 recent observed block intervals; dates remain
-unknown until live samples exist. Warnings identify Online accounts with a
-missing local registered key, registered keys within 14 days of expiry, and
-Online accounts whose registered local key has expired. These are estimates,
-not a renewal schedule.
+`vnode --redact` reads your live node and disguises everything that could be
+looked up on-chain:
 
-## Safety and validation
+- addresses, participation keys and key IDs become salted hashes, consistent
+  within the run;
+- each balance is scaled by its own random factor, so neither amounts nor their
+  ratios match the chain;
+- labels are hidden;
+- every round on screen is shifted by one random offset: the block number, key
+  validity ranges, and the QR's `votefst`/`votelst`. That stops a block number
+  next to "last proposal 2s ago" from pointing at your account.
 
-Every generation/deletion requires explicit confirmation. Deleting the registered
-key of an Online account requires typing the full address and warns that the node
-stops voting. The app re-fetches on-chain account state just before deletion, so a
-stale Offline screen cannot bypass this guard. Other deletions require `y`.
-Deleting a local key does not submit an offline transaction; use `o` and sign the
-URI externally when you intend to take an account offline.
+The disguise changes every run. Account count, expiry countdowns, the network's
+online stake and the block time stay real. `--redact` implies `--read-only` and
+hides the READ ONLY badge.
 
-`--read-only` blocks node generation/deletion and watch-list additions/removals.
-Viewing and copying online/offline URIs is available in this mode because it does
-not write anything to algod; signing an offline URI elsewhere changes account
-status. The app holds no spending keys, mnemonics, wallets, or signing capability.
-It has no automatic renewal, kmd, relay, or telemetry management.
-
-Network errors remain visible, reads keep retrying, and input stays responsive.
-The header stays visible across screens, visibly ticks on blocks, and shows
-catchup/unsupported-protocol/stalled status. Writes do not auto-retry.
+## Development
 
 ```sh
 make test
 make vet
 make build
-file bin/vnode
 ```
 
-Tests use only `httptest` fake algod servers and injected filesystem/docker
-interfaces. Development and validation never require a real node or Docker.
+Tests run against `httptest` fake algod servers and injected filesystem and Docker
+interfaces. They never need a real node or Docker.
 
-The algod SDK v2 supplies public REST calls, account types, and checksum
-validation. Participation endpoints missing from that SDK use `net/http`, matching
-the [official REST contract](https://dev.algorand.co/reference/rest-api/algod/operations/getparticipationkeys/).
-The pinned Bubble Tea v1 / Bubbles v1 / Lip Gloss v1 versions are compatible with
-each other. [qrterminal/v3](https://pkg.go.dev/github.com/mdp/qrterminal/v3@v3.2.1)
-renders pure-Go half-block QR codes with no subprocess or C dependency.
+The algod Go SDK v2 supplies the REST client and types. The participation
+endpoints it lacks use `net/http`, per the
+[algod REST reference](https://dev.algorand.co/reference/rest-api/algod/operations/getparticipationkeys/).
+The UI is Bubble Tea, Bubbles and Lip Gloss (v1). QR codes come from
+[qrterminal/v3](https://pkg.go.dev/github.com/mdp/qrterminal/v3), pure Go with no
+subprocess. `SPEC.md` is the original v1 spec, kept for history.

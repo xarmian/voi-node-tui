@@ -167,10 +167,25 @@ func TestOfflineQRHasNoKeys(t *testing.T) {
 	}
 	m := New(context.Background(), c, accounts.Store{Path: filepath.Join(t.TempDir(), "watch.json")}, true)
 	m.rows = []row{{Account: models.Account{Address: testAddress, Status: "Offline"}}}
+	// An unidentified network gets no URI at all.
 	m.Update(key("o"))
-	want := "voi://net:voimain-v1.0/" + testAddress + "?type=keyreg"
-	if m.uri != want || !strings.Contains(m.View(), "WARNING") {
-		t.Fatal("offline URI or visible fallback warning missing")
+	if m.uri != "" || !strings.Contains(m.message, "unknown network") {
+		t.Fatalf("unknown network must be refused: uri %q message %q", m.uri, m.message)
+	}
+	m.version.GenesisID = "voimain-v1.0"
+	m.Update(key("o"))
+	if want := "voi://net:voimain-v1.0/" + testAddress + "?type=keyreg"; m.uri != want {
+		t.Fatalf("offline URI %q; want %q", m.uri, want)
+	}
+	m.Update(key("esc"))
+	m.version.GenesisID = "mainnet-v1.0"
+	m.Update(key("o"))
+	if want := "algorand://" + testAddress + "?type=keyreg"; m.uri != want {
+		t.Fatalf("algorand offline URI %q; want %q", m.uri, want)
+	}
+	m.Update(key("f"))
+	if strings.Contains(m.uri, "fee=") {
+		t.Fatal("go-offline must not carry the incentive fee")
 	}
 }
 
@@ -401,5 +416,33 @@ func TestRedactDisguisesOnChainIdentifiers(t *testing.T) {
 	}
 	if r.round(100) == 100 || r.round(0) != 0 {
 		t.Fatal("round offset wrong")
+	}
+}
+
+func TestAlgorandIncentiveFeeToggle(t *testing.T) {
+	m := New(context.Background(), nil, accounts.Store{}, true)
+	m.version.GenesisID = "mainnet-v1.0"
+	m.rows = []row{{Account: models.Account{Address: testAddress, Status: "Offline"}}}
+	m.keys = []algod.ParticipationKey{{Id: "K", Address: testAddress, Key: models.AccountParticipation{
+		VoteParticipationKey: bytes.Repeat([]byte{1}, 32), SelectionParticipationKey: bytes.Repeat([]byte{2}, 32),
+		VoteFirstValid: 10, VoteLastValid: 20, VoteKeyDilution: 3}}}
+	m.Update(key("enter"))
+	if !strings.HasPrefix(m.uri, "algorand://"+testAddress+"?type=keyreg&votekey=") || strings.Contains(m.uri, "fee=") {
+		t.Fatalf("default URI %q", m.uri)
+	}
+	m.Update(key("f"))
+	if !strings.HasSuffix(m.uri, "&fee=2000000") || m.mode != "qr" {
+		t.Fatalf("fee not added: %q mode %q", m.uri, m.mode)
+	}
+	m.Update(key("f"))
+	if strings.Contains(m.uri, "fee=") {
+		t.Fatalf("fee not removed: %q", m.uri)
+	}
+	m.Update(key("esc"))
+	m.version.GenesisID = "voimain-v1.0"
+	m.Update(key("enter"))
+	m.Update(key("f"))
+	if strings.Contains(m.uri, "fee=") {
+		t.Fatal("Voi must never get the Algorand incentive fee")
 	}
 }
