@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,7 +33,7 @@ type OSSystem struct{}
 func (OSSystem) Getenv(k string) string            { return os.Getenv(k) }
 func (OSSystem) ReadFile(p string) ([]byte, error) { return os.ReadFile(p) }
 
-// Inspect only reads bridge metadata. It never starts or execs a container.
+// Inspect only reads network metadata. It never starts or execs a container.
 func (OSSystem) Inspect(ctx context.Context, name string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -46,9 +47,22 @@ func (OSSystem) Inspect(ctx context.Context, name string) (string, error) {
 	if json.Unmarshal(b, &networks) != nil {
 		return "", errors.New("invalid docker network metadata")
 	}
-	n, ok := networks["bridge"]
-	if !ok || net.ParseIP(n.IPAddress) == nil {
-		return "", errors.New("container has no default bridge IP")
+	n := networks["bridge"]
+	if n.IPAddress == "" {
+		names := make([]string, 0, len(networks))
+		for name := range networks {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if networks[name].IPAddress != "" {
+				n = networks[name]
+				break
+			}
+		}
+	}
+	if net.ParseIP(n.IPAddress) == nil {
+		return "", errors.New("container has no valid network IP")
 	}
 	return n.IPAddress, nil
 }

@@ -3,8 +3,39 @@ package algod
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestInspectNetworkSelection(t *testing.T) {
+	// Only run this fixture executable; never contact a Docker daemon.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nprintf '%s\\n' \"$VNODE_TEST_NETWORKS\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	for _, tc := range []struct {
+		name, networks, want string
+	}{
+		{"prefer bridge", `{"aaa":{"IPAddress":"172.18.0.2"},"bridge":{"IPAddress":"172.17.0.2"}}`, "172.17.0.2"},
+		{"named network", `{"voi_default":{"IPAddress":"172.18.0.2"}}`, "172.18.0.2"},
+		{"sorted names", `{"zulu":{"IPAddress":"172.20.0.2"},"alpha":{"IPAddress":"172.18.0.2"}}`, "172.18.0.2"},
+		{"skip empty", `{"alpha":{"IPAddress":""},"zulu":{"IPAddress":"172.20.0.2"}}`, "172.20.0.2"},
+		{"empty bridge", `{"bridge":{"IPAddress":""},"voi_default":{"IPAddress":"172.18.0.2"}}`, "172.18.0.2"},
+		{"no IP", `{"host":{"IPAddress":""}}`, ""},
+		{"invalid IP", `{"bridge":{"IPAddress":"invalid"}}`, ""},
+		{"invalid JSON", `{`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("VNODE_TEST_NETWORKS", tc.networks)
+			got, err := (OSSystem{}).Inspect(context.Background(), "fixture")
+			if got != tc.want || (err != nil) != (tc.want == "") {
+				t.Fatalf("IP=%q err=%v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
 
 type fakeSystem struct {
 	env   map[string]string
