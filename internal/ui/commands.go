@@ -108,6 +108,14 @@ func (m *Model) refresh() tea.Cmd {
 }
 func (m *Model) applyRefresh(x refreshMsg) {
 	m.lastRefresh = time.Now()
+	if m.redact != nil {
+		for i := range x.rows {
+			x.rows[i] = m.redact.row(x.rows[i])
+		}
+		for i := range x.keys {
+			x.keys[i] = m.redact.key(x.keys[i])
+		}
+	}
 	if x.status != nil {
 		m.acceptStatus(*x.status, x.at, false)
 	}

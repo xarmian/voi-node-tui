@@ -21,6 +21,15 @@ For Voi Swarm autodetection, that user also needs permission to run `docker
 inspect`. The app only inspects metadata; it never starts containers or runs
 commands inside them. Remove `--read-only` when you want to manage keys.
 
+### Screenshots
+
+`./vnode --redact` shows your live node with everything that could be looked up
+on-chain disguised: addresses, participation keys and key ids become keyed
+hashes, balances are scaled per account, labels are hidden, and every round on
+screen (the block number, key validity ranges, the QR's `votefst`/`votelst`) is
+shifted by a random offset. The disguise changes each run. `--redact` implies
+`--read-only`.
+
 ## Connection and flags
 
 The first configured source wins. A partial explicit source fails with an error

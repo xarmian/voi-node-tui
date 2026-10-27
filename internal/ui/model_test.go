@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"bytes"
+
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/algorand/go-algorand-sdk/v2/types"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -371,5 +374,32 @@ func TestAbandonGeneration(t *testing.T) {
 	}
 	if !strings.Contains(helpText, "does not cancel generation inside algod") {
 		t.Fatal("help must explain abandonment")
+	}
+}
+
+func TestRedactDisguisesOnChainIdentifiers(t *testing.T) {
+	r := newRedactor()
+	vote := bytes.Repeat([]byte{7}, 32)
+	sprf := bytes.Repeat([]byte{9}, 64)
+	in := row{Account: models.Account{Address: testAddress, Amount: 5_000_000_000, Participation: models.AccountParticipation{VoteParticipationKey: vote, StateProofKey: sprf}}, Label: "home"}
+	k := algod.ParticipationKey{Id: "REALID", Address: testAddress, Key: models.AccountParticipation{VoteParticipationKey: vote, StateProofKey: sprf}}
+	out, ko := r.row(in), r.key(k)
+	if out.Address == testAddress || ko.Address != out.Address {
+		t.Fatalf("address not disguised consistently: %s / %s", out.Address, ko.Address)
+	}
+	if _, err := types.DecodeAddress(out.Address); err != nil {
+		t.Fatalf("fake address is not a valid address: %v", err)
+	}
+	if out.Amount == in.Amount || out.Label == "home" || ko.Id == "REALID" {
+		t.Fatal("balance, label or key id leaked")
+	}
+	if bytes.Equal(ko.Key.VoteParticipationKey, vote) || len(ko.Key.StateProofKey) != 64 {
+		t.Fatal("participation keys not replaced at the same length")
+	}
+	if !accounts.Registered(out.Account, ko) {
+		t.Fatal("redacted key no longer matches its redacted account")
+	}
+	if r.round(100) == 100 || r.round(0) != 0 {
+		t.Fatal("round offset wrong")
 	}
 }

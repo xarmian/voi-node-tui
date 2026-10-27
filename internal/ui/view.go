@@ -67,7 +67,7 @@ func (m *Model) header() string {
 		network = "unknown network"
 	}
 	left := gradient("◆ vnode") + "  " + pill(network, cViolet) + " " + sMuted.Render(fmt.Sprintf("algod %d.%d.%d", m.version.Build.Major, m.version.Build.Minor, m.version.Build.BuildNumber))
-	if m.readOnly {
+	if m.readOnly && m.redact == nil {
 		left += " " + pill("READ ONLY", cWarn)
 	}
 	label, color := m.health()
@@ -91,7 +91,7 @@ func (m *Model) header() string {
 			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#059669")).Render("●")
 		}
 	}
-	block := sMuted.Render("BLOCK ") + sBold.Render(commas(m.status.LastRound)) + " " + dot + sMuted.Render("  last ") + sText.Render(since)
+	block := sMuted.Render("BLOCK ") + sBold.Render(commas(m.shown(m.status.LastRound))) + " " + dot + sMuted.Render("  last ") + sText.Render(since)
 	if m.average > 0 {
 		block += sMuted.Render("  avg ") + sText.Render(fmt.Sprintf("%.2fs", m.average.Seconds())) + "  " + spark(m.samples, 24)
 	}
@@ -151,7 +151,7 @@ func (m *Model) View() string {
 	if m.mode == "qr" {
 		// The QR needs every row it can get; a one-line header still shows the node is live.
 		label, color := m.health()
-		header = ansi.Truncate(" "+gradient("◆ vnode")+"  "+sMuted.Render("block ")+sBold.Render(commas(m.status.LastRound))+"  "+pill(label, color), max(1, m.width), "…")
+		header = ansi.Truncate(" "+gradient("◆ vnode")+"  "+sMuted.Render("block ")+sBold.Render(commas(m.shown(m.status.LastRound)))+"  "+pill(label, color), max(1, m.width), "…")
 	}
 	footer := m.statusLine() + "\n" + m.hints()
 	w := max(20, m.width)
@@ -514,7 +514,7 @@ func (m *Model) keyLine(a *row, k algod.ParticipationKey, selected bool, w int) 
 	if last > first {
 		line += "  " + bar(float64(left)/float64(last-first), 20, lifeColor(dur, m.average > 0))
 	}
-	line += sMuted.Render(fmt.Sprintf("  rounds %s – %s", commas(first), commas(last)))
+	line += sMuted.Render(fmt.Sprintf("  rounds %s – %s", commas(m.shown(first)), commas(m.shown(last))))
 	switch {
 	case left == 0:
 		line += "  " + sBad.Render("expired")

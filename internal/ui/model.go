@@ -38,6 +38,7 @@ type Model struct {
 	samples                       []time.Duration
 	average                       time.Duration
 	baseline                      time.Duration
+	redact                        *redactor
 	baselineAt                    time.Time
 	seeding                       bool
 	pulse                         bool

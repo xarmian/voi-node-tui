@@ -30,6 +30,9 @@ func (m *Model) showURI(offline, qr bool) bool {
 			return false
 		}
 		p = k.Key
+		if m.redact != nil {
+			p.VoteFirstValid, p.VoteLastValid = m.shown(p.VoteFirstValid), m.shown(p.VoteLastValid)
+		}
 	}
 	uri, warning, err := arc90.Build(m.version.GenesisID, a.Address, p, offline)
 	if err != nil {
