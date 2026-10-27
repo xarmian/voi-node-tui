@@ -204,7 +204,9 @@ looked up on-chain:
   validity ranges, and the QR's `votefst`/`votelst`, so neither can be looked up.
 
 The disguise changes every run. Account count, expiry countdowns, the network's
-online stake and the block time stay real. `--redact` implies `--read-only` and
+online stake, the block time, and vote and state-proof ages stay real. Every
+online account votes in every round and signs the same state proofs, so those
+ages don't single anyone out. `--redact` implies `--read-only` and
 hides the READ ONLY badge.
 
 ## Development
