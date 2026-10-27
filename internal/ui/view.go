@@ -148,6 +148,11 @@ func (m *Model) hints() string {
 
 func (m *Model) View() string {
 	header := m.header()
+	if m.mode == "qr" {
+		// The QR needs every row it can get; a one-line header still shows the node is live.
+		label, color := m.health()
+		header = ansi.Truncate(" "+gradient("◆ vnode")+"  "+sMuted.Render("block ")+sBold.Render(commas(m.status.LastRound))+"  "+pill(label, color), max(1, m.width), "…")
+	}
 	footer := m.statusLine() + "\n" + m.hints()
 	w := max(20, m.width)
 	body := ""
@@ -155,7 +160,7 @@ func (m *Model) View() string {
 	case "help":
 		body = m.helpView(w)
 	case "qr", "uri":
-		body = m.qrView(w, lipgloss.Height(header)+lipgloss.Height(footer)+2)
+		body = m.qrView(w, max(1, m.height-lipgloss.Height(header)-lipgloss.Height(footer)-1))
 	case "":
 		body = m.dashboard()
 	default:
@@ -199,32 +204,44 @@ func (m *Model) dialog(w int) string {
 	return "\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, box)
 }
 
-func (m *Model) qrView(w, chrome int) string {
-	var b strings.Builder
+// qrView fits the QR into avail rows, shedding the URI text and then the title before
+// giving up on the QR; the URI is always one keypress (c) away.
+func (m *Model) qrView(w, avail int) string {
 	title := "Scan with Voi Wallet to register this key"
 	if strings.HasSuffix(m.uri, "?type=keyreg") {
 		title = "Scan with Voi Wallet to take this account offline"
 	}
-	b.WriteString("\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, sSection.Render(title)) + "\n")
+	head := lipgloss.PlaceHorizontal(w, lipgloss.Center, sSection.Render(title))
 	if a := m.current(); a != nil {
-		b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Center, sMuted.Render(a.Address)) + "\n")
+		head += "\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, sMuted.Render(a.Address))
 	}
+	warn := ""
 	if m.networkWarning != "" {
-		b.WriteString(warningStyle.Render(ansi.Hardwrap("WARNING: "+strings.TrimPrefix(m.networkWarning, "WARNING: "), w, false)) + "\n")
+		warn = warningStyle.Render(ansi.Hardwrap("WARNING: "+strings.TrimPrefix(m.networkWarning, "WARNING: "), w, false)) + "\n"
 	}
-	b.WriteString("\n")
-	tail := "\n" + sDim.Render(ansi.Hardwrap(m.uri, w, false)) + "\n"
-	if m.qr != "" {
-		needH := lipgloss.Height(b.String()) + lipgloss.Height(m.qr) + lipgloss.Height(tail) + chrome
-		needW := lipgloss.Width(m.qr)
-		if needW <= w && needH <= m.height {
-			b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Center, strings.TrimRight(m.qr, "\n")) + "\n")
-		} else {
-			b.WriteString(sWarn.Render(ansi.Hardwrap(fmt.Sprintf("Enlarge the terminal to at least %d columns × %d rows to scan the complete QR.", needW, needH), w, false)) + "\n")
-		}
+	uri := sDim.Render(ansi.Hardwrap(m.uri, w, false))
+	if m.qr == "" {
+		return "\n" + head + "\n" + warn + "\n" + uri + "\n"
 	}
-	b.WriteString(tail)
-	return b.String()
+	qr := strings.TrimRight(m.qr, "\n")
+	qrW, qrH := lipgloss.Width(qr), lipgloss.Height(qr)
+	warnH := lipgloss.Height(warn) - 1
+	if qrW > w || qrH+warnH > avail {
+		msg := fmt.Sprintf("The QR needs %d columns × %d rows; this view has %d × %d. Enlarge the terminal or zoom out to scan it.", qrW, qrH+warnH, w, avail)
+		return "\n" + head + "\n" + warn + sWarn.Render(ansi.Hardwrap(msg, w, false)) + "\n\n" + uri + "\n"
+	}
+	centred := lipgloss.PlaceHorizontal(w, lipgloss.Center, qr)
+	hint := lipgloss.PlaceHorizontal(w, lipgloss.Center, sMuted.Render("press ")+sKeycap.Render("c")+sMuted.Render(" to copy the URI"))
+	headH, uriH := lipgloss.Height(head), lipgloss.Height(uri)
+	switch {
+	case 1+headH+1+warnH+qrH+1+uriH <= avail:
+		return "\n" + head + "\n" + warn + "\n" + centred + "\n\n" + uri + "\n"
+	case headH+warnH+qrH+1 <= avail:
+		return head + "\n" + warn + centred + "\n" + hint + "\n"
+	case 1+warnH+qrH <= avail:
+		return lipgloss.PlaceHorizontal(w, lipgloss.Center, sSection.Render(title)) + "\n" + warn + centred + "\n"
+	}
+	return warn + centred + "\n"
 }
 
 type tile struct{ label, value, sub string }

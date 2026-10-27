@@ -44,7 +44,7 @@ func (m *Model) showURI(offline, qr bool) bool {
 	if qr {
 		var b bytes.Buffer
 		// Explicit colors preserve contrast with either a light or dark terminal.
-		qrterminal.GenerateWithConfig(uri, qrterminal.Config{Writer: &b, Level: qrterminal.L, HalfBlocks: true, QuietZone: 4, BlackChar: "\x1b[30;47m█\x1b[0m", WhiteChar: "\x1b[30;47m \x1b[0m", BlackWhiteChar: "\x1b[30;47m▀\x1b[0m", WhiteBlackChar: "\x1b[30;47m▄\x1b[0m"})
+		qrterminal.GenerateWithConfig(uri, qrterminal.Config{Writer: &b, Level: qrterminal.L, HalfBlocks: true, QuietZone: 2, BlackChar: "\x1b[30;47m█\x1b[0m", WhiteChar: "\x1b[30;47m \x1b[0m", BlackWhiteChar: "\x1b[30;47m▀\x1b[0m", WhiteBlackChar: "\x1b[30;47m▄\x1b[0m"})
 		m.qr = b.String()
 		m.mode = "qr"
 	}
