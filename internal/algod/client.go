@@ -55,7 +55,9 @@ func New(conn Connection, readOnly bool) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	tr := transport{base: http.DefaultTransport.(*http.Transport).Clone()}
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = nil // Always connect directly; never send the admin token to a proxy.
+	tr := transport{base: base}
 	s, err := sdk.MakeClientWithTransport(checked.URL, checked.Token, nil, tr)
 	if err != nil {
 		return nil, errors.New("cannot initialize algod client")
