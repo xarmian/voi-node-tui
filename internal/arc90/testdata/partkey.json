@@ -1,0 +1,6 @@
+{
+ "id":"YRV3PARTKEYID", "address":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ",
+ "effective-first-valid":12345, "effective-last-valid":5012345,
+ "key":{"vote-participation-key":"+/8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","selection-participation-key":"//4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","state-proof-key":"+/8=","vote-first-valid":12345,"vote-last-valid":5012345,"vote-key-dilution":2237},
+ "last-vote":12400,"last-block-proposal":12390,"last-state-proof":12288
+}
