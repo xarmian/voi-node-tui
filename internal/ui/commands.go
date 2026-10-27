@@ -136,8 +136,11 @@ func (m *Model) applyRefresh(x refreshMsg) {
 	}
 	if p := m.pending; p != nil && x.keysOK {
 		for _, k := range m.keys {
-			if k.Address == p.address && !p.existing[k.Id] && k.Key.VoteFirstValid == p.first && k.Key.VoteLastValid == p.last {
+			if k.Address == p.address && !p.existing[k.Id] && k.Key.VoteFirstValid >= p.first {
 				m.pending = nil
+				if m.mode == "abandon-generation" {
+					m.mode = ""
+				}
 				m.message = "New key appeared. Select it and press Enter to register it in your wallet."
 				for i, r := range m.rows {
 					if r.Address == p.address {

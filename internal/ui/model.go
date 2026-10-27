@@ -109,6 +109,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case waitAgainMsg:
 		return m, m.wait()
 	case tickMsg:
+		if p := m.pending; p != nil && time.Time(x).Sub(p.started) >= 20*time.Minute {
+			m.pending = nil
+			m.message = "No new key appeared after 20m; check the keys list or algod logs."
+			if m.mode == "abandon-generation" {
+				m.mode = ""
+			}
+		}
 		cmds := []tea.Cmd{tick()}
 		interval := 5 * time.Second
 		if m.pending != nil {
@@ -138,7 +145,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch x.action {
 		case "generate":
-			m.message = "Generation accepted; polling for the new key (can take minutes)."
+			if m.pending != nil {
+				m.message = "Generation accepted; polling for the new key (can take minutes)."
+			}
 		case "add":
 			m.message = "Account saved."
 			m.mode = "offer-generate"
@@ -164,6 +173,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if x.String() == "esc" {
+			if m.mode == "" && m.pending != nil {
+				m.mode = "abandon-generation"
+				m.resetScroll()
+				m.prompt = "Abandon waiting for the new key? This does not cancel generation inside algod. y/N"
+				return m, nil
+			}
 			m.mode = ""
 			m.removalKeys = nil
 			m.input.Blur()

@@ -56,7 +56,7 @@ func (m *Model) showURI(offline, qr bool) bool {
 }
 func (m *Model) beginGenerate() tea.Cmd {
 	if m.pending != nil {
-		m.message = "Generation is already pending; polling until its key appears."
+		m.message = "Generation is already pending; press Esc on the dashboard to abandon the wait."
 		return nil
 	}
 	if m.statusAt.IsZero() || time.Since(m.statusAt) > 30*time.Second {
@@ -156,6 +156,10 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	switch m.mode {
+	case "abandon-generation":
+		m.pending = nil
+		m.mode = ""
+		m.message = "Generation wait abandoned; this does not cancel generation inside algod. Check the keys before retrying."
 	case "offer-generate":
 		return m.beginGenerate()
 	case "generate-confirm":

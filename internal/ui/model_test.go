@@ -284,3 +284,88 @@ func TestLiveRoundsEstimateAndRetry(t *testing.T) {
 		t.Fatal("long poll did not retry")
 	}
 }
+
+func TestGenerationTimeout(t *testing.T) {
+	m := New(context.Background(), nil, accounts.Store{}, false)
+	start := time.Now()
+	m.rows = []row{{Account: models.Account{Address: testAddress}}}
+	m.statusAt = start
+	m.refreshing = true // A stalled or failed refresh must not prevent expiry.
+	m.pending = &generation{address: testAddress, started: start}
+	m.Update(tickMsg(start.Add(20*time.Minute - time.Second)))
+	if m.pending == nil {
+		t.Fatal("generation expired early")
+	}
+	m.Update(tickMsg(start.Add(20 * time.Minute)))
+	if m.pending != nil || !strings.Contains(m.message, "No new key appeared after 20m") || !strings.Contains(m.message, "algod logs") {
+		t.Fatalf("generation did not time out clearly: %s", m.message)
+	}
+	m.Update(key("g"))
+	if m.mode != "generate-range" {
+		t.Fatal("generation remained blocked after timeout")
+	}
+}
+
+func TestGenerationMatchesNewClampedKey(t *testing.T) {
+	for _, tc := range []struct {
+		name, id, address string
+		first, last       uint64
+		wantMatch         bool
+	}{
+		{"clamped range", "new", testAddress, 110, 180, true},
+		{"same first different last", "new", testAddress, 100, 180, true},
+		{"existing id", "old", testAddress, 100, 200, false},
+		{"earlier first", "new", testAddress, 99, 200, false},
+		{"different account", "new", "other", 100, 200, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(context.Background(), nil, accounts.Store{}, false)
+			m.rows = []row{{Account: models.Account{Address: testAddress}}}
+			m.pending = &generation{address: testAddress, first: 100, last: 200, existing: map[string]bool{"old": true}, started: time.Now()}
+			m.Update(refreshMsg{keysOK: true, keys: []algod.ParticipationKey{{Id: tc.id, Address: tc.address, Key: models.AccountParticipation{VoteFirstValid: tc.first, VoteLastValid: tc.last}}}})
+			if (m.pending == nil) != tc.wantMatch {
+				t.Fatalf("match = %t, want %t", m.pending == nil, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestAbandonGeneration(t *testing.T) {
+	m := New(context.Background(), nil, accounts.Store{}, false)
+	m.rows = []row{{Account: models.Account{Address: testAddress}}}
+	m.statusAt = time.Now()
+	m.pending = &generation{address: testAddress, started: time.Now()}
+	esc := tea.KeyMsg{Type: tea.KeyEsc}
+	m.Update(key("?"))
+	m.Update(esc)
+	if m.mode != "" || m.pending == nil {
+		t.Fatal("Esc should close help while keeping the wait")
+	}
+	for _, cancel := range []tea.KeyMsg{key("n"), key("enter"), esc} {
+		m.Update(esc)
+		if m.mode == "" || m.pending == nil || !strings.Contains(m.prompt, "y/N") || !strings.Contains(m.prompt, "does not cancel generation inside algod") {
+			t.Fatal("Esc must ask before abandoning generation")
+		}
+		m.Update(cancel)
+		if m.pending == nil || m.mode != "" {
+			t.Fatal("default answer must keep waiting")
+		}
+	}
+	m.Update(esc)
+	_, cmd := m.Update(key("y"))
+	if cmd != nil || m.pending != nil || m.mode != "" || !strings.Contains(m.message, "does not cancel generation inside algod") {
+		t.Fatal("confirmed abandonment must clear only the UI wait")
+	}
+	// A POST reply arriving after abandonment must not claim polling continues.
+	m.Update(operationMsg{action: "generate"})
+	if strings.Contains(m.message, "polling") {
+		t.Fatal("late POST reply restored the waiting message")
+	}
+	m.Update(key("g"))
+	if m.mode != "generate-range" {
+		t.Fatal("generation remained blocked after abandonment")
+	}
+	if !strings.Contains(helpText, "does not cancel generation inside algod") {
+		t.Fatal("help must explain abandonment")
+	}
+}

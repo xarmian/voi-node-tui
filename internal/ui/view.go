@@ -229,11 +229,13 @@ d            Delete selected key after confirmation
 r            Remove watch-list entry; offer individually guarded key deletions
 R            Refresh everything
 ?            Help
-Esc          Close QR/help/prompt or cancel the remaining delete queue
+Esc          Close QR/help/prompt, cancel delete queue, or offer to abandon generation
 Ctrl+C       Quit
 
 Generation and deletion require explicit confirmation. An Online registered key
 requires typing its full account address; deleting it stops voting.
+Generation waits up to 20 minutes. Esc on the dashboard offers to abandon the wait;
+abandoning does not cancel generation inside algod.
 Read-only mode blocks all node and watch-list writes.
 QRs are signed externally in Voi Wallet or pasted into voirewards.
 This node holds no spending keys, mnemonics, or signing capability.
