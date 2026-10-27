@@ -135,7 +135,7 @@ func TestReadOnlyAndNetworkFailure(t *testing.T) {
 		t.Fatal("client read-only guard")
 	}
 	m := New(context.Background(), c, accounts.Store{Path: filepath.Join(t.TempDir(), "watch.json")}, true)
-	for _, s := range []string{"a", "g", "d", "r", "o"} {
+	for _, s := range []string{"a", "g", "d", "r"} {
 		_, cmd := m.Update(key(s))
 		if cmd != nil || m.mode != "" {
 			t.Fatalf("read-only %s", s)
@@ -148,5 +148,19 @@ func TestReadOnlyAndNetworkFailure(t *testing.T) {
 	_, cmd := m.Update(tickMsg(time.Now()))
 	if cmd == nil {
 		t.Fatal("no retry scheduled")
+	}
+}
+
+func TestOfflineQRHasNoKeys(t *testing.T) {
+	c, err := algod.New(algod.Connection{URL: "http://127.0.0.1:1", Token: "fake"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(context.Background(), c, accounts.Store{Path: filepath.Join(t.TempDir(), "watch.json")}, true)
+	m.rows = []row{{Account: models.Account{Address: testAddress, Status: "Offline"}}}
+	m.Update(key("o"))
+	want := "voi://net:voimain-v1.0/" + testAddress + "?type=keyreg"
+	if m.uri != want || !strings.Contains(m.View(), "WARNING") {
+		t.Fatal("offline URI or visible fallback warning missing")
 	}
 }
