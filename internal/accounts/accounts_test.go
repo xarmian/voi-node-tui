@@ -37,7 +37,7 @@ func TestDeriveWarningsAndExpiry(t *testing.T) {
 	}
 	a.Participation = k.Key
 	d = Derive(a, []algod.ParticipationKey{k}, 201, time.Second, now)
-	if !has(d.Warnings, WarningExpired) || d.RoundsLeft != 0 {
+	if !has(d.Warnings, WarningExpired) || d.RoundsLeft != 0 || !d.ExpiresAt.Equal(now.Add(-time.Second)) {
 		t.Fatal(d)
 	}
 	a.Status = "Offline"

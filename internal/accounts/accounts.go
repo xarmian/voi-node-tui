@@ -60,8 +60,18 @@ func Derive(a models.Account, keys []algod.ParticipationKey, round uint64, block
 	if d.Last > round {
 		d.RoundsLeft = d.Last - round
 	}
-	if blockTime > 0 && d.Last > 0 && d.RoundsLeft <= uint64(math.MaxInt64/int64(blockTime)) {
-		d.ExpiresAt = now.Add(time.Duration(d.RoundsLeft) * blockTime)
+	if blockTime > 0 && d.Last > 0 {
+		delta := d.RoundsLeft
+		if round > d.Last {
+			delta = round - d.Last
+		}
+		if delta <= uint64(math.MaxInt64/int64(blockTime)) {
+			estimate := time.Duration(delta) * blockTime
+			if round > d.Last {
+				estimate = -estimate
+			}
+			d.ExpiresAt = now.Add(estimate)
+		}
 	}
 	if a.Status == "Online" {
 		if d.RegisteredID == "" {
