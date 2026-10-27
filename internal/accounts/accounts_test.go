@@ -93,3 +93,13 @@ func TestWatchList(t *testing.T) {
 		t.Fatal(xs, err)
 	}
 }
+
+func TestUnrelatedExpiredKeyDoesNotWarn(t *testing.T) {
+	a := models.Account{Address: address, Status: "Online", Participation: models.AccountParticipation{VoteParticipationKey: []byte{1}}}
+	registered := algod.ParticipationKey{Id: "active", Address: address, Key: models.AccountParticipation{VoteParticipationKey: []byte{1}, VoteLastValid: 2000000}}
+	old := algod.ParticipationKey{Id: "old", Address: address, Key: models.AccountParticipation{VoteParticipationKey: []byte{2}, VoteLastValid: 50}}
+	d := Derive(a, []algod.ParticipationKey{old, registered}, 100, time.Second, time.Now())
+	if len(d.Warnings) != 0 || d.RegisteredID != "active" {
+		t.Fatalf("unrelated key affected registration: %+v", d)
+	}
+}

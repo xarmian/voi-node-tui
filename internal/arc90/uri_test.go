@@ -26,7 +26,7 @@ func TestGolden(t *testing.T) {
 		offline bool
 		want    string
 	}{
-		{"with proof", true, false, prefix + keys + "&sprfkey=-_8" + suffix},
+		{"with proof", true, false, prefix + keys + "&sprfkey=-_8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + suffix},
 		{"without proof", false, false, prefix + keys + suffix},
 		{"offline", false, true, prefix},
 	} {
