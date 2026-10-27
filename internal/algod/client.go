@@ -88,6 +88,20 @@ func (c *Client) Versions(ctx context.Context) (models.Version, error) {
 	v, err := c.sdk.Versions().Do(ctx)
 	return v, safeError("versions", err)
 }
+
+// BlockTime returns a block's header timestamp (unix seconds).
+func (c *Client) BlockTime(ctx context.Context, round uint64) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	blk, err := c.sdk.Block(round).HeaderOnly(true).Do(ctx)
+	return blk.TimeStamp, safeError("block header", err)
+}
+func (c *Client) Supply(ctx context.Context) (models.Supply, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	s, err := c.sdk.Supply().Do(ctx)
+	return s, safeError("supply", err)
+}
 func (c *Client) Account(ctx context.Context, address string) (models.Account, error) {
 	if _, err := types.DecodeAddress(address); err != nil {
 		return models.Account{}, errors.New("invalid account checksum")

@@ -43,6 +43,10 @@ func TestFakeAlgodGenerateQRDelete(t *testing.T) {
 			fmt.Fprint(w, `{"last-round":100,"time-since-last-round":1000000000}`)
 		case r.URL.Path == "/versions":
 			fmt.Fprint(w, `{"genesis_id":"voimain-v1.0","build":{"major":5,"minor":0,"build_number":4}}`)
+		case strings.HasPrefix(r.URL.Path, "/v2/blocks/"):
+			http.NotFound(w, r)
+		case r.URL.Path == "/v2/ledger/supply":
+			fmt.Fprint(w, `{"current_round":100,"online-money":1000000000000,"total-money":10000000000000}`)
 		case r.URL.Path == "/v2/participation" && r.Method == "GET":
 			if generated && !deleted {
 				polls++

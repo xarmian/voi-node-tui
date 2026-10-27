@@ -33,9 +33,13 @@ type Model struct {
 	readOnly                      bool
 	status                        models.NodeStatus
 	version                       models.Version
+	supply                        models.Supply
 	statusAt, roundAt, observedAt time.Time
 	samples                       []time.Duration
 	average                       time.Duration
+	baseline                      time.Duration
+	baselineAt                    time.Time
+	seeding                       bool
 	pulse                         bool
 	rows                          []row
 	keys                          []algod.ParticipationKey
@@ -67,12 +71,19 @@ type blockMsg struct {
 type refreshMsg struct {
 	status  *models.NodeStatus
 	version *models.Version
+	supply  *models.Supply
 	keys    []algod.ParticipationKey
 	keysOK  bool
 	rows    []row
 	rowsOK  bool
 	err     error
 	at      time.Time
+}
+
+// baselineMsg carries the mean block time over a long window of real block timestamps.
+type baselineMsg struct {
+	avg time.Duration
+	ok  bool
 }
 type operationMsg struct {
 	action string
@@ -106,6 +117,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.waitErr = ""
 		m.acceptStatus(x.status, x.at, true)
 		return m, m.wait()
+	case baselineMsg:
+		m.seeding = false
+		m.baselineAt = time.Now()
+		if x.ok {
+			m.baseline = x.avg
+			m.average = x.avg
+		}
 	case waitAgainMsg:
 		return m, m.wait()
 	case tickMsg:
@@ -117,6 +135,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		cmds := []tea.Cmd{tick()}
+		if !m.seeding && m.status.LastRound > baselineWindow && (m.baselineAt.IsZero() || time.Since(m.baselineAt) > 10*time.Minute) {
+			m.seeding = true
+			cmds = append(cmds, m.seedBaseline())
+		}
 		interval := 5 * time.Second
 		if m.pending != nil {
 			interval = 2 * time.Second
@@ -313,6 +335,9 @@ func (m *Model) acceptStatus(s models.NodeStatus, at time.Time, live bool) {
 					total += d
 				}
 				m.average = total / time.Duration(len(m.samples))
+				if m.baseline > 0 {
+					m.average = m.baseline
+				}
 			}
 		}
 		m.pulse = !m.pulse

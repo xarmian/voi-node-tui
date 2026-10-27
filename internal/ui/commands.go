@@ -17,6 +17,22 @@ func (m *Model) wait() tea.Cmd {
 	ctx, c, round := m.ctx, m.client, m.status.LastRound
 	return func() tea.Msg { s, err := c.Wait(ctx, round); return blockMsg{s, err, time.Now()} }
 }
+
+// baselineWindow is how many rounds the block-time baseline spans.
+const baselineWindow = 1000
+
+func (m *Model) seedBaseline() tea.Cmd {
+	ctx, c, last := m.ctx, m.client, m.status.LastRound
+	return func() tea.Msg {
+		t1, err1 := c.BlockTime(ctx, last)
+		t0, err0 := c.BlockTime(ctx, last-baselineWindow)
+		if err1 != nil || err0 != nil || t1 <= t0 {
+			return baselineMsg{}
+		}
+		return baselineMsg{avg: time.Duration(t1-t0) * time.Second / baselineWindow, ok: true}
+	}
+}
+
 func (m *Model) refresh() tea.Cmd {
 	ctx, c, store := m.ctx, m.client, m.store
 	oldKeys := append([]algod.ParticipationKey(nil), m.keys...)
@@ -35,6 +51,10 @@ func (m *Model) refresh() tea.Cmd {
 			out.version = &v
 		} else {
 			errs = append(errs, err)
+		}
+		// Supply only feeds the stake-share figures; a failure there is not worth an error line.
+		if sup, err := c.Supply(ctx); err == nil {
+			out.supply = &sup
 		}
 		ks, err := c.Keys(ctx)
 		if err == nil {
@@ -93,6 +113,9 @@ func (m *Model) applyRefresh(x refreshMsg) {
 	}
 	if x.version != nil {
 		m.version = *x.version
+	}
+	if x.supply != nil {
+		m.supply = *x.supply
 	}
 	addr, keyID := "", ""
 	if a := m.current(); a != nil {

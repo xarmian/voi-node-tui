@@ -10,10 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/xarmian/voi-node-tui/internal/accounts"
+	"github.com/xarmian/voi-node-tui/internal/algod"
 )
-
-var titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
-var warningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 
 func clean(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -29,108 +27,146 @@ func short(s string) string {
 	}
 	return s
 }
+
+// roundsAgo turns a past round into a human age, or a round count before block time is known.
+func (m *Model) roundsAgo(round uint64) string {
+	if round == 0 {
+		return "never"
+	}
+	if round >= m.status.LastRound {
+		return "just now"
+	}
+	n := m.status.LastRound - round
+	if m.average <= 0 {
+		return fmt.Sprintf("%d rnd", n)
+	}
+	return span(time.Duration(n)*m.average) + " ago"
+}
+
+// health classifies the node for the header pill.
+func (m *Model) health() (string, lipgloss.Color) {
+	switch {
+	case m.netErr != "" || m.waitErr != "":
+		return "CONNECTION ERROR", cBad
+	case m.status.StoppedAtUnsupportedRound:
+		return "STOPPED: UNSUPPORTED PROTOCOL", cBad
+	case m.statusAt.IsZero():
+		return "CONNECTING", cMuted
+	case m.status.CatchupTime > 0 || m.status.Catchpoint != "":
+		return "CATCHING UP", cWarn
+	case !m.roundAt.IsZero() && time.Since(m.roundAt) > 30*time.Second:
+		return "STALLED", cWarn
+	}
+	return "● HEALTHY", cOK
+}
+
 func (m *Model) header() string {
-	health := "syncing"
-	since := "unknown"
-	catchup := "none"
-	if !m.roundAt.IsZero() {
-		elapsed := max(time.Duration(0), time.Since(m.roundAt))
-		since = elapsed.Round(time.Second).String()
-		health = "healthy"
-		if elapsed > 30*time.Second {
-			health = "stalled / catching up"
-		}
-	}
-	if m.statusAt.IsZero() {
-		health = "connecting"
-	}
-	if m.status.CatchupTime > 0 || m.status.Catchpoint != "" {
-		health = "catching up"
-		catchup = fmt.Sprintf("%s, %.1fs", clean(m.status.Catchpoint), float64(m.status.CatchupTime)/1e9)
-	}
-	if m.status.StoppedAtUnsupportedRound {
-		health = "stopped: unsupported protocol"
-	}
-	if m.netErr != "" || m.waitErr != "" {
-		health = "connection error / stale data"
-	}
-	pulse := "·"
-	if m.pulse {
-		pulse = "*"
-	}
-	readonly := ""
-	if m.readOnly {
-		readonly = " [READ ONLY]"
-	}
+	w := max(20, m.width)
 	network := clean(m.version.GenesisID)
 	if network == "" {
-		network = "unknown"
+		network = "unknown network"
 	}
-	lines := []string{
-		titleStyle.Render(fmt.Sprintf("vnode%s  %s round %d  last %s  %s", readonly, pulse, m.status.LastRound, since, health)),
-		fmt.Sprintf("Network %s  algod %d.%d.%d", network, m.version.Build.Major, m.version.Build.Minor, m.version.Build.BuildNumber),
-		fmt.Sprintf("Catchup: %s  Protocol: %s", catchup, clean(m.status.LastVersion)),
+	left := gradient("◆ vnode") + "  " + pill(network, cViolet) + " " + sMuted.Render(fmt.Sprintf("algod %d.%d.%d", m.version.Build.Major, m.version.Build.Minor, m.version.Build.BuildNumber))
+	if m.readOnly {
+		left += " " + pill("READ ONLY", cWarn)
+	}
+	label, color := m.health()
+	line1 := spread(left, pill(label, color), w-4)
+
+	// The dot flashes on each new block and cools as the block ages.
+	dot := sDim.Render("●")
+	since := "—"
+	if !m.roundAt.IsZero() {
+		age := max(0, time.Since(m.roundAt))
+		since = span(age)
+		if since == "now" {
+			since = "just now"
+		} else {
+			since += " ago"
+		}
+		switch {
+		case age < 1500*time.Millisecond:
+			dot = sOK.Bold(true).Render("●")
+		case age < 4*time.Second:
+			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#059669")).Render("●")
+		}
+	}
+	block := sMuted.Render("BLOCK ") + sBold.Render(commas(m.status.LastRound)) + " " + dot + sMuted.Render("  last ") + sText.Render(since)
+	if m.average > 0 {
+		block += sMuted.Render("  avg ") + sText.Render(fmt.Sprintf("%.2fs", m.average.Seconds())) + "  " + spark(m.samples, 24)
+	}
+	right := ""
+	if m.supply.OnlineMoney > 0 {
+		right = sMuted.Render("network online ") + sText.Render(compactVOI(m.supply.OnlineMoney)+" VOI")
+	}
+	lines := []string{line1, spread(block, right, w-4)}
+	if m.status.CatchupTime > 0 || m.status.Catchpoint != "" {
+		lines = append(lines, sWarn.Render(fmt.Sprintf("catchup %s  %.1fs", clean(m.status.Catchpoint), float64(m.status.CatchupTime)/1e9)))
 	}
 	for i := range lines {
-		lines[i] = ansi.Truncate(lines[i], max(1, m.width), "…")
+		lines[i] = ansi.Truncate(lines[i], w-4, "…")
 	}
-	return strings.Join(lines, "\n")
+	return panel(cPanel, w).Render(strings.Join(lines, "\n"))
 }
-func (m *Model) View() string {
-	header := m.header()
+
+func (m *Model) statusLine() string {
+	icon, style := "›", sMuted
 	status := clean(m.message)
 	if m.working {
+		icon, style = "◌", sAccent
 		status = "Working… " + status
 	}
 	if m.pending != nil {
+		icon, style = "◌", sAccent
 		status = fmt.Sprintf("Generating for %s — waiting for key (%s); algod may take minutes. %s", short(m.pending.address), time.Since(m.pending.started).Round(time.Second), status)
 	}
 	if m.netErr != "" {
+		icon, style = "✖", sBad
 		status = clean(m.netErr) + " | " + status
 	}
 	if m.waitErr != "" {
+		icon, style = "✖", sBad
 		status = clean(m.waitErr) + " | " + status
 	}
-	footer := ansi.Truncate(status, max(1, m.width), "…") + "\n" + ansi.Truncate("↑/↓ accounts  ←/→ keys  h/l pan  PgUp/PgDn scroll  ? help  Esc close  Ctrl+C quit", max(1, m.width), "…")
+	return ansi.Truncate(" "+style.Render(icon+" "+status), max(1, m.width), "…")
+}
+
+func (m *Model) hints() string {
+	var h string
+	switch m.mode {
+	case "":
+		h = keycaps("↑↓", "account", "←→", "key", "⏎", "qr", "c", "copy", "o", "offline", "g", "renew", "a", "add", "d", "delete", "?", "help", "^C", "quit")
+	case "qr", "uri":
+		h = keycaps("c", "copy uri", "esc", "back", "PgUp/PgDn", "scroll", "^C", "quit")
+	case "help":
+		h = keycaps("esc", "back", "PgUp/PgDn", "scroll", "^C", "quit")
+	default:
+		h = keycaps("esc", "cancel", "^C", "quit")
+	}
+	return ansi.Truncate(" "+h, max(1, m.width), "…")
+}
+
+func (m *Model) View() string {
+	header := m.header()
+	footer := m.statusLine() + "\n" + m.hints()
+	w := max(20, m.width)
 	body := ""
 	switch m.mode {
 	case "help":
-		body = helpText
+		body = m.helpView(w)
 	case "qr", "uri":
-		if m.networkWarning != "" {
-			body += warningStyle.Render(ansi.Hardwrap(m.networkWarning, max(1, m.width), false)) + "\n"
-		}
-		tail := "\n" + ansi.Hardwrap(m.uri, max(1, m.width), false) + "\n\nc: copy via OSC 52  Esc: return"
-		if m.qr != "" {
-			candidate := body + m.qr + tail
-			requiredHeight := lipgloss.Height(candidate) + lipgloss.Height(header) + lipgloss.Height(footer) + 2
-			requiredWidth := lipgloss.Width(m.qr)
-			if requiredWidth <= m.width && requiredHeight <= m.height {
-				body += m.qr
-			} else {
-				body += ansi.Hardwrap(fmt.Sprintf("Enlarge the terminal to at least %d columns × %d rows to scan the complete QR.", requiredWidth, requiredHeight), max(1, m.width), false) + "\n"
-			}
-		}
-		body += tail
+		body = m.qrView(w, lipgloss.Height(header)+lipgloss.Height(footer)+2)
+	case "":
+		body = m.dashboard()
 	default:
-		if m.mode != "" {
-			body = ansi.Hardwrap(cleanPrompt(m.prompt), max(1, m.width), false) + "\n"
-			switch m.mode {
-			case "add-address", "add-label", "generate-range", "delete-address":
-				body += m.input.View() + "\nEnter: submit  Esc: cancel"
-			default:
-				body += "y: confirm  any other key: cancel"
-			}
-		} else {
-			body = m.dashboard()
-		}
+		body = m.dialog(w)
 	}
-	m.viewport.Height = max(1, m.height-lipgloss.Height(header)-lipgloss.Height(footer)-2)
+	m.viewport.Height = max(1, m.height-lipgloss.Height(header)-lipgloss.Height(footer)-1)
 	m.viewport.Width = max(1, m.width)
-
 	m.viewport.SetContent(body)
-	return header + "\n\n" + m.viewport.View() + "\n" + footer
+	return header + "\n" + m.viewport.View() + "\n" + footer
 }
+
 func cleanPrompt(s string) string {
 	parts := strings.Split(s, "\n")
 	for i := range parts {
@@ -138,101 +174,366 @@ func cleanPrompt(s string) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+func (m *Model) dialog(w int) string {
+	border, title := cViolet, "Confirm"
+	switch m.mode {
+	case "delete-confirm", "delete-address", "remove-confirm", "remove-keys":
+		border, title = cBad, "Destructive action"
+	case "abandon-generation":
+		border, title = cWarn, "Abandon wait"
+	case "add-address", "add-label":
+		title = "Add account"
+	case "generate-range", "generate-confirm", "offer-generate":
+		title = "Generate participation key"
+	}
+	inner := min(w-4, 84)
+	content := lipgloss.NewStyle().Foreground(border).Bold(true).Render(title) + "\n\n" + sText.Render(ansi.Hardwrap(cleanPrompt(m.prompt), inner-4, false)) + "\n\n"
+	switch m.mode {
+	case "add-address", "add-label", "generate-range", "delete-address":
+		content += m.input.View() + "\n\n" + keycaps("⏎", "submit", "esc", "cancel")
+	default:
+		content += keycaps("y", "confirm", "any other key", "cancel")
+	}
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(1, 2).Width(inner).Render(content)
+	return "\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, box)
+}
+
+func (m *Model) qrView(w, chrome int) string {
+	var b strings.Builder
+	title := "Scan with Voi Wallet to register this key"
+	if strings.HasSuffix(m.uri, "?type=keyreg") {
+		title = "Scan with Voi Wallet to take this account offline"
+	}
+	b.WriteString("\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, sSection.Render(title)) + "\n")
+	if a := m.current(); a != nil {
+		b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Center, sMuted.Render(a.Address)) + "\n")
+	}
+	if m.networkWarning != "" {
+		b.WriteString(warningStyle.Render(ansi.Hardwrap("WARNING: "+strings.TrimPrefix(m.networkWarning, "WARNING: "), w, false)) + "\n")
+	}
+	b.WriteString("\n")
+	tail := "\n" + sDim.Render(ansi.Hardwrap(m.uri, w, false)) + "\n"
+	if m.qr != "" {
+		needH := lipgloss.Height(b.String()) + lipgloss.Height(m.qr) + lipgloss.Height(tail) + chrome
+		needW := lipgloss.Width(m.qr)
+		if needW <= w && needH <= m.height {
+			b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Center, strings.TrimRight(m.qr, "\n")) + "\n")
+		} else {
+			b.WriteString(sWarn.Render(ansi.Hardwrap(fmt.Sprintf("Enlarge the terminal to at least %d columns × %d rows to scan the complete QR.", needW, needH), w, false)) + "\n")
+		}
+	}
+	b.WriteString(tail)
+	return b.String()
+}
+
+type tile struct{ label, value, sub string }
+
+func (m *Model) tiles(w int) string {
+	var online, total, stake uint64
+	var lastProp uint64
+	nextLeft, haveNext := time.Duration(0), false
+	nextRounds := uint64(0)
+	dots := ""
+	for _, r := range m.rows {
+		d := accounts.Derive(r.Account, m.keys, m.status.LastRound, m.average, time.Now())
+		total++
+		switch {
+		case r.Status == "Online" && len(d.Warnings) == 0 && r.Err == nil:
+			online++
+			stake += r.Amount
+			dots += sOK.Render("●")
+		case r.Status == "Online":
+			online++
+			stake += r.Amount
+			dots += sWarn.Render("▲")
+		default:
+			dots += sDim.Render("○")
+		}
+		lastProp = max(lastProp, d.LastProposal)
+		if r.Status == "Online" && d.Last > 0 && (!haveNext || d.RoundsLeft < nextRounds) {
+			haveNext, nextRounds = true, d.RoundsLeft
+			nextLeft = time.Duration(d.RoundsLeft) * m.average
+		}
+	}
+
+	onlineValue := fmt.Sprintf("%d / %d", online, total)
+	if online == total && total > 0 {
+		onlineValue = sOK.Bold(true).Render(onlineValue)
+	} else {
+		onlineValue = sWarn.Bold(true).Render(onlineValue)
+	}
+	stakeSub := sMuted.Render("held by online accounts")
+	propValue, propSub := sBold.Render("—"), sMuted.Render("needs network stake")
+	if m.supply.OnlineMoney > 0 && stake > 0 {
+		share := float64(stake) / float64(m.supply.OnlineMoney)
+		stakeSub = sCyan.Render(fmt.Sprintf("%.3f%%", share*100)) + sMuted.Render(" of online stake")
+		if m.average > 0 {
+			perDay := share * float64(24*time.Hour) / float64(m.average)
+			figure := fmt.Sprintf("%.1f", perDay)
+			if perDay >= 100 {
+				figure = commas(uint64(perDay + 0.5))
+			}
+			propValue = sBold.Render("~" + figure + " / day")
+		}
+		propSub = sMuted.Render("last ") + sText.Render(m.roundsAgo(lastProp))
+	}
+	expValue, expSub := sBold.Render("—"), sMuted.Render("no registered keys")
+	if haveNext {
+		if m.average > 0 {
+			expValue = lipgloss.NewStyle().Foreground(lifeColor(nextLeft, true)).Bold(true).Render(span(nextLeft))
+			expSub = sMuted.Render("soonest, ") + sText.Render(time.Now().Add(nextLeft).UTC().Format("2006-01-02"))
+		} else {
+			expValue = sBold.Render(commas(nextRounds) + " rnd")
+			expSub = sMuted.Render("soonest key expiry")
+		}
+	}
+	ts := []tile{
+		{"ONLINE", onlineValue, dots},
+		{"STAKE", sBold.Render(compactVOI(stake) + " VOI"), stakeSub},
+		{"EXPECTED PROPOSALS", propValue, propSub},
+		{"NEXT KEY EXPIRY", expValue, expSub},
+	}
+	perRow := 4
+	if w < 88 {
+		perRow = 2
+	}
+	tw := w / perRow
+	var rows []string
+	for i := 0; i < len(ts); i += perRow {
+		var cells []string
+		for _, t := range ts[i:min(len(ts), i+perRow)] {
+			body := sColHead.Render(t.label) + "\n" + t.value + "\n" + ansi.Truncate(t.sub, tw-4, "…")
+			cells = append(cells, panel(cDim, tw).Render(body))
+		}
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
+	}
+	return strings.Join(rows, "\n")
+}
+
 func (m *Model) dashboard() string {
+	w := max(20, m.width)
 	if len(m.rows) == 0 {
-		return "No participation accounts. Press a to add an address to the watch list."
+		msg := sSection.Render("No participation accounts yet") + "\n\n" + sMuted.Render("Press ") + sKeycap.Render("a") + sMuted.Render(" to add an address, then ") + sKeycap.Render("g") + sMuted.Render(" to generate its participation key.")
+		return "\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, panel(cPanel, min(w, 72)).Padding(1, 2).Render(msg))
 	}
 	var b strings.Builder
-	count := max(3, (m.height-13)/2)
+	b.WriteString(m.tiles(w) + "\n")
+
+	showLabel, showProp, showBar := w >= 118, w >= 100, w >= 84
+	barW := 14
+	head := "    " + fmt.Sprintf("%-17s", "ACCOUNT")
+	if showLabel {
+		head += fmt.Sprintf("%-14s", "LABEL")
+	}
+	head += fmt.Sprintf("%10s  ", "BALANCE")
+	if showBar {
+		head += fmt.Sprintf("%-*s ", barW, "KEY LIFE")
+	}
+	head += fmt.Sprintf("%-11s%-11s", "EXPIRES IN", "LAST VOTE")
+	if showProp {
+		head += "LAST PROPOSAL"
+	}
+	b.WriteString("\n" + sSection.Render(" ACCOUNTS ") + sDim.Render(strings.Repeat("─", max(0, w-11))) + "\n")
+	b.WriteString(sColHead.Render(head) + "\n")
+
+	count := max(3, m.height-26)
 	start := max(0, min(m.selected-count/2, len(m.rows)-count))
 	end := min(len(m.rows), start+count)
-	fmt.Fprintf(&b, "ACCOUNTS %d–%d / %d  (h/l scroll columns; ! = warning or stale data)\n", start+1, end, len(m.rows))
-	fmt.Fprintln(&b, "  ADDRESS          LABEL         BALANCE VOI  STATUS   INCENTIVE  REGISTERED KEY   VALID RANGE            ROUNDS LEFT  EXPIRY (EST. UTC)     LAST VOTE  LAST PROPOSAL")
 	now := time.Now()
 	for i := start; i < end; i++ {
 		r := m.rows[i]
 		d := accounts.Derive(r.Account, m.keys, m.status.LastRound, m.average, now)
-		mark := " "
-		if i == m.selected {
-			mark = ">"
+		sel := i == m.selected
+		bg := func(s lipgloss.Style) lipgloss.Style {
+			if sel {
+				return s.Background(cSelBg)
+			}
+			return s
 		}
-		expiry, left, valid := "unknown", "—", "—"
+		cell := func(s lipgloss.Style, text string) string { return bg(s).Render(text) }
+
+		marker := cell(sDim, "  ")
+		if sel {
+			marker = cell(sAccent.Bold(true), "▌ ")
+		}
+		icon, iconStyle := "○", sDim
+		switch {
+		case r.Err != nil:
+			icon, iconStyle = "✖", sBad
+		case r.Status == "Online" && len(d.Warnings) > 0:
+			icon, iconStyle = "▲", sWarn
+		case r.Status == "Online":
+			icon, iconStyle = "●", sOK
+		}
+		addrStyle := sText
+		if sel {
+			addrStyle = sBold
+		}
+		line := marker + cell(iconStyle, icon+" ") + cell(addrStyle, fmt.Sprintf("%-17s", short(r.Address)))
+		if showLabel {
+			line += cell(sAccent, fmt.Sprintf("%-14s", ansi.Truncate(clean(r.Label), 13, "…")))
+		}
+		line += cell(sText, fmt.Sprintf("%10s  ", compactVOI(r.Amount)))
+		left := time.Duration(d.RoundsLeft) * m.average
+		known := m.average > 0
+		if showBar {
+			if d.Last > d.First && d.Last > 0 {
+				frac := float64(d.RoundsLeft) / float64(d.Last-d.First)
+				var rowBg lipgloss.TerminalColor = lipgloss.NoColor{}
+				if sel {
+					rowBg = cSelBg
+				}
+				line += barOn(frac, barW, lifeColor(left, known), rowBg) + cell(sText, " ")
+			} else {
+				line += cell(sDim, fmt.Sprintf("%-*s ", barW, "no key"))
+			}
+		}
+		expires := "—"
 		if d.Last > 0 {
-			left = fmt.Sprint(d.RoundsLeft)
-			valid = fmt.Sprintf("%d–%d", d.First, d.Last)
+			expires = fmt.Sprintf("%d rnd", d.RoundsLeft)
+			if known {
+				expires = span(left)
+			}
 		}
-		if !d.ExpiresAt.IsZero() {
-			expiry = d.ExpiresAt.UTC().Format("2006-01-02 15:04")
+		line += cell(lipgloss.NewStyle().Foreground(lifeColor(left, known && d.Last > 0)), fmt.Sprintf("%-11s", expires))
+		vote, voteStyle := m.roundsAgo(d.LastVote), sMuted
+		if d.LastVote > 0 && m.status.LastRound-min(m.status.LastRound, d.LastVote) <= 3 {
+			vote, voteStyle = "● live", sOK
+		} else if r.Status == "Online" {
+			voteStyle = sWarn
 		}
-		id := short(d.RegisteredID)
-		if id == "" {
-			id = "none"
+		line += cell(voteStyle, fmt.Sprintf("%-11s", vote))
+		if showProp {
+			line += cell(sMuted, fmt.Sprintf("%-13s", m.roundsAgo(d.LastProposal)))
 		}
-		state := r.Status
-		if r.Err != nil || len(d.Warnings) > 0 {
-			state += "!"
+		if sel {
+			line += bg(lipgloss.NewStyle()).Render(strings.Repeat(" ", max(0, w-lipgloss.Width(line))))
 		}
-		fmt.Fprintf(&b, "%s %-16s %-12s %12s %-8s %-10t %-16s %-22s %11s  %-19s %9d %14d\n", mark, short(r.Address), ansi.Truncate(clean(r.Label), 12, "…"), fmt.Sprintf("%d.%06d", r.Amount/1000000, r.Amount%1000000), state, r.IncentiveEligible, id, valid, left, expiry, d.LastVote, d.LastProposal)
+		b.WriteString(ansi.Truncate(line, w, "…") + "\n")
 	}
-	a := m.current()
-	if a == nil {
-		return b.String()
+	if len(m.rows) > end-start {
+		b.WriteString(sDim.Render(fmt.Sprintf("    %d–%d of %d", start+1, end, len(m.rows))) + "\n")
 	}
-	fmt.Fprintf(&b, "\nSelected: %s  %s\n", a.Address, clean(a.Label))
-	if a.Err != nil {
-		fmt.Fprintln(&b, warningStyle.Render("Account data is stale: "+a.Err.Error()))
-	}
-	d := accounts.Derive(a.Account, m.keys, m.status.LastRound, m.average, now)
-	for _, w := range d.Warnings {
-		fmt.Fprintln(&b, warningStyle.Render("WARNING: "+w))
-	}
-	if m.average > 0 {
-		fmt.Fprintf(&b, "Estimated expiry uses recent average block time: %s (%d samples).\n", m.average.Round(time.Millisecond), len(m.samples))
-	} else {
-		fmt.Fprintln(&b, "Expiry date unknown until live block-time samples are available.")
-	}
-	fmt.Fprintln(&b, "\nLOCAL KEYS (←/→ select; Enter shows registration QR)")
-	ks := m.accountKeys()
-	if len(ks) == 0 {
-		fmt.Fprintln(&b, "No local keys. Press g to generate one.")
-	}
-	for i, k := range ks {
-		mark := " "
-		if i == m.keyIndex {
-			mark = ">"
-		}
-		registered := ""
-		if accounts.Registered(a.Account, k) {
-			registered = " [registered on-chain]"
-		}
-		effective := "not reported"
-		if k.EffectiveFirstValid != nil && k.EffectiveLastValid != nil {
-			effective = fmt.Sprintf("%d–%d", *k.EffectiveFirstValid, *k.EffectiveLastValid)
-		}
-		fmt.Fprintf(&b, "%s %s%s\n  valid %d–%d  dilution %d  effective %s\n  last vote %d  proposal %d  state proof %d\n", mark, clean(k.Id), registered, k.Key.VoteFirstValid, k.Key.VoteLastValid, k.Key.VoteKeyDilution, effective, k.LastVote, k.LastBlockProposal, k.LastStateProof)
-	}
+	b.WriteString(m.detail(w))
 	return b.String()
 }
 
-const helpText = `ACCOUNTS / KEYS
-↑/↓ or j/k   Select account (full address shown below the table)
-←/→ or [/]   Select its participation key
-h/l          Pan wide tables left/right
-PgUp/PgDn    Scroll details; Home/End jump
+func (m *Model) detail(w int) string {
+	a := m.current()
+	if a == nil {
+		return ""
+	}
+	now := time.Now()
+	d := accounts.Derive(a.Account, m.keys, m.status.LastRound, m.average, now)
+	var b strings.Builder
+	name := "Account"
+	if l := clean(a.Label); l != "" {
+		name = l
+	}
+	b.WriteString(sSection.Render(name) + "  " + sCyan.Render(a.Address) + "\n")
 
-a            Add checksum-validated address and optional label; offer generation
-g            Generate / renew; edit round span (default 5,000,000), then confirm
-q / Enter    Show selected key's registration QR and URI
-c            Copy URI with OSC 52 and show it for manual copy
-o            Show offline registration QR (no keys)
-d            Delete selected key after confirmation
-r            Remove watch-list entry; offer individually guarded key deletions
-R            Refresh everything
-?            Help
-Esc          Close QR/help/prompt, cancel delete queue, or offer to abandon generation
-Ctrl+C       Quit
+	status := sDim.Render(a.Status)
+	if a.Status == "Online" {
+		status = sOK.Render("Online")
+	}
+	incentive := sDim.Render("✗ not incentive eligible")
+	if a.IncentiveEligible {
+		incentive = sOK.Render("✓ incentive eligible")
+	}
+	facts := []string{sMuted.Render("balance ") + sText.Render(exactVOI(a.Amount)+" VOI"), status, incentive}
+	if m.supply.OnlineMoney > 0 && a.Status == "Online" {
+		share := float64(a.Amount) / float64(m.supply.OnlineMoney)
+		facts = append(facts, sCyan.Render(fmt.Sprintf("%.4f%%", share*100))+sMuted.Render(" of online stake"))
+		if m.average > 0 {
+			facts = append(facts, sText.Render(fmt.Sprintf("~%.2f", share*float64(24*time.Hour)/float64(m.average)))+sMuted.Render(" blocks/day"))
+		}
+	}
+	b.WriteString(flow(facts, sDim.Render("  ·  "), w-4) + "\n")
+	if a.Err != nil {
+		b.WriteString(sWarn.Render("▲ Account data is stale: "+clean(a.Err.Error())) + "\n")
+	}
+	for _, warn := range d.Warnings {
+		b.WriteString(sWarn.Bold(true).Render("▲ WARNING: "+warn) + "\n")
+	}
 
-Generation and deletion require explicit confirmation. An Online registered key
+	ks := m.accountKeys()
+	b.WriteString("\n" + sColHead.Render(fmt.Sprintf("PARTICIPATION KEYS (%d)", len(ks))) + "\n")
+	if len(ks) == 0 {
+		b.WriteString(sMuted.Render("No keys on this node. Press ") + sKeycap.Render("g") + sMuted.Render(" to generate one.") + "\n")
+	}
+	for i, k := range ks {
+		b.WriteString(m.keyLine(a, k, i == m.keyIndex, w-4))
+	}
+	switch {
+	case m.baseline > 0:
+		b.WriteString(sDim.Render(fmt.Sprintf("Dates estimated at %.2fs per block, averaged over the last %s blocks.", m.average.Seconds(), commas(baselineWindow))))
+	case m.average > 0:
+		b.WriteString(sDim.Render(fmt.Sprintf("Dates estimated from %d live blocks at %.2fs; refining…", len(m.samples), m.average.Seconds())))
+	default:
+		b.WriteString(sDim.Render("Dates appear once live block times are sampled."))
+	}
+	return "\n" + panel(cPanel, w).Render(b.String())
+}
+
+func (m *Model) keyLine(a *row, k algod.ParticipationKey, selected bool, w int) string {
+	marker := "  "
+	idStyle := sMuted
+	if selected {
+		marker = sAccent.Bold(true).Render("▸ ")
+		idStyle = sBold
+	}
+	line := marker + idStyle.Render(short(clean(k.Id)))
+	if accounts.Registered(a.Account, k) {
+		line += " " + pill("REGISTERED", cOK)
+	}
+	round := m.status.LastRound
+	first, last := k.Key.VoteFirstValid, k.Key.VoteLastValid
+	var left uint64
+	if last > round {
+		left = last - round
+	}
+	dur := time.Duration(left) * m.average
+	if last > first {
+		line += "  " + bar(float64(left)/float64(last-first), 20, lifeColor(dur, m.average > 0))
+	}
+	line += sMuted.Render(fmt.Sprintf("  rounds %s – %s", commas(first), commas(last)))
+	switch {
+	case left == 0:
+		line += "  " + sBad.Render("expired")
+	case m.average > 0:
+		line += "  " + lipgloss.NewStyle().Foreground(lifeColor(dur, true)).Render(span(dur)+" left")
+	}
+	sub := fmt.Sprintf("    dilution %d  ·  last vote %s  ·  last proposal %s  ·  state proof %s", k.Key.VoteKeyDilution, m.roundsAgo(k.LastVote), m.roundsAgo(k.LastBlockProposal), m.roundsAgo(k.LastStateProof))
+	if k.EffectiveFirstValid == nil {
+		sub += "  ·  not yet effective"
+	}
+	return ansi.Truncate(line, w, "…") + "\n" + ansi.Truncate(sDim.Render(sub), w, "…") + "\n"
+}
+
+func (m *Model) helpView(w int) string {
+	groups := []struct {
+		title string
+		keys  [][2]string
+	}{
+		{"NAVIGATE", [][2]string{{"↑ ↓  j k", "Select account"}, {"← →  [ ]", "Select participation key"}, {"h l", "Pan wide content"}, {"PgUp PgDn", "Scroll; Home/End jump"}, {"R", "Refresh everything"}}},
+		{"REGISTER", [][2]string{{"⏎  q", "Registration QR + URI for the selected key"}, {"c", "Copy the URI (OSC 52) and show it"}, {"o", "Go-offline QR (no keys)"}}},
+		{"MANAGE", [][2]string{{"a", "Add an address (checksum-validated) and label"}, {"g", "Generate / renew a key; edit the round span"}, {"d", "Delete the selected key (confirmed)"}, {"r", "Remove from the watch list"}}},
+		{"ALWAYS", [][2]string{{"?", "This help"}, {"esc", "Close, cancel, or offer to abandon a generation wait"}, {"ctrl+c", "Quit"}}},
+	}
+	var b strings.Builder
+	for _, g := range groups {
+		b.WriteString(sSection.Render(g.title) + "\n")
+		for _, k := range g.keys {
+			b.WriteString("  " + sKeycap.Render(fmt.Sprintf("%-10s", k[0])) + "  " + sText.Render(k[1]) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(sMuted.Render(helpText))
+	return "\n" + panel(cPanel, min(w, 96)).Padding(1, 2).Render(b.String())
+}
+
+const helpText = `Generation and deletion require explicit confirmation. An Online registered key
 requires typing its full account address; deleting it stops voting.
 Generation waits up to 20 minutes. Esc on the dashboard offers to abandon the wait;
 abandoning does not cancel generation inside algod.
