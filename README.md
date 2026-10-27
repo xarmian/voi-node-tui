@@ -8,6 +8,15 @@ URI that you sign in a wallet. The node never holds spending keys.
 
 It's a single static binary that you run over SSH on the node host.
 
+![Dashboard: node health, summary tiles, accounts with key-life gauges, and the selected account's keys](docs/screenshots/dashboard.png)
+
+<p align="center">
+  <img src="docs/screenshots/qr.png" alt="Registration QR with its ARC-90 keyreg URI" width="49%">
+  <img src="docs/screenshots/help.png" alt="Help screen" width="49%">
+</p>
+
+<sub>Screenshots taken with <code>--redact</code>: the addresses, keys, balances and rounds are disguised.</sub>
+
 ## What it shows
 
 - **Header:** the network, algod version and node health (healthy, catching up,
@@ -226,3 +235,7 @@ endpoints it lacks use `net/http`, per the
 The UI is Bubble Tea, Bubbles and Lip Gloss (v1). QR codes come from
 [qrterminal/v3](https://pkg.go.dev/github.com/mdp/qrterminal/v3), pure Go with no
 subprocess. `SPEC.md` is the original v1 spec, kept for history.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
