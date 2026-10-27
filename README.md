@@ -198,9 +198,10 @@ looked up on-chain:
 - each balance is scaled by its own random factor, so neither amounts nor their
   ratios match the chain;
 - labels are hidden;
+- each account's proposal history is pushed back by its own random 5-70 minutes,
+  so the proposal ages can't be matched to recent blocks;
 - every round on screen is shifted by one random offset: the block number, key
-  validity ranges, and the QR's `votefst`/`votelst`. That stops a block number
-  next to "last proposal 2s ago" from pointing at your account.
+  validity ranges, and the QR's `votefst`/`votelst`, so neither can be looked up.
 
 The disguise changes every run. Account count, expiry countdowns, the network's
 online stake and the block time stay real. `--redact` implies `--read-only` and

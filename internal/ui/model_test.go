@@ -414,6 +414,10 @@ func TestRedactDisguisesOnChainIdentifiers(t *testing.T) {
 	if !accounts.Registered(out.Account, ko) {
 		t.Fatal("redacted key no longer matches its redacted account")
 	}
+	k.LastBlockProposal = 1_000_000
+	if got := r.key(k).LastBlockProposal; got >= k.LastBlockProposal || k.LastBlockProposal-got < 100 || k.LastBlockProposal-got >= 1500 {
+		t.Fatalf("proposal age not lagged: %d -> %d", k.LastBlockProposal, got)
+	}
 	if r.round(100) == 100 || r.round(0) != 0 {
 		t.Fatal("round offset wrong")
 	}

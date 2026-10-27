@@ -14,9 +14,10 @@ import (
 
 // redactor disguises live data for shareable screenshots. Everything that can be looked up
 // on-chain is replaced consistently for the session: addresses, participation keys and key
-// ids are keyed hashes of the real values, balances are scaled per account, and every round
-// shown on screen is shifted by a fixed offset (so a block number or a keyreg's validity range
-// can't be matched to a transaction). The live node is still read; nothing is written.
+// ids are keyed hashes of the real values, balances are scaled per account, proposal history
+// lags by a per-account amount, and every round shown on screen is shifted by a fixed offset
+// (so a block number, a proposal age or a keyreg's validity range can't be matched to the
+// chain). The live node is still read; nothing is written.
 type redactor struct {
 	salt   [32]byte
 	offset uint64
@@ -84,7 +85,19 @@ func (r *redactor) row(x row) row {
 	return x
 }
 
+// proposalLag pushes an account's proposals back by a fixed 100-1,500 rounds (roughly
+// 5-70 minutes), so the ages on screen can't be matched to recent blocks' proposers.
+func (r *redactor) proposalLag(addr string) uint64 {
+	h := r.sum("lag", []byte(addr))
+	return 100 + uint64(binary.LittleEndian.Uint16(h[:2]))%1400
+}
+
 func (r *redactor) key(k algod.ParticipationKey) algod.ParticipationKey {
+	if lag := r.proposalLag(k.Address); k.LastBlockProposal > lag {
+		k.LastBlockProposal -= lag
+	} else {
+		k.LastBlockProposal = 0
+	}
 	k.Address = r.address(k.Address)
 	id := r.sum("id", []byte(k.Id))
 	k.Id = base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(id[:])[:52]
