@@ -2,10 +2,10 @@ package arc90
 
 import (
 	"encoding/json"
-	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
-	"github.com/xarmian/voi-node-tui/internal/algod"
 	"os"
 	"testing"
+
+	"github.com/xarmian/voi-node-tui/internal/algod"
 )
 
 func TestGolden(t *testing.T) {

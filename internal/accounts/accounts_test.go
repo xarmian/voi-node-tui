@@ -1,11 +1,13 @@
 package accounts
 
 import (
-	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
-	"github.com/xarmian/voi-node-tui/internal/algod"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
+
+	"github.com/xarmian/voi-node-tui/internal/algod"
 )
 
 const address = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ"

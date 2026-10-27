@@ -31,3 +31,18 @@ func TestWaitForBlockAndSafeErrors(t *testing.T) {
 		t.Fatal("unsafe or missing error")
 	}
 }
+
+func TestAccountRejectsIncompleteOrMismatchedState(t *testing.T) {
+	for _, body := range []string{`{}`, `{"address":"wrong","status":"Offline"}`, `{"address":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ","status":"unknown"}`} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
+		c, err := New(Connection{URL: srv.URL, Token: "fake"}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.Account(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ")
+		srv.Close()
+		if err == nil {
+			t.Fatal("accepted invalid on-chain state")
+		}
+	}
+}
