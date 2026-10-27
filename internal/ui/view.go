@@ -147,7 +147,7 @@ func (m *Model) hints() string {
 		h = keycaps("↑↓", "account", "←→", "key", "⏎", "qr", "c", "copy", "o", "offline", "g", "renew", "a", "add", "d", "delete", "?", "help", "^C", "quit")
 	case "qr", "uri":
 		h = keycaps("c", "copy uri", "esc", "back", "PgUp/PgDn", "scroll", "^C", "quit")
-		if m.network().Algorand && !m.uriOffline {
+		if _, ok := arc90.Lookup(m.version.GenesisID); ok && !m.uriOffline {
 			h = keycaps("c", "copy uri", "f", "incentive fee", "esc", "back", "^C", "quit")
 		}
 	case "help":
@@ -229,10 +229,10 @@ func (m *Model) qrView(w, avail int) string {
 		head += "\n" + lipgloss.PlaceHorizontal(w, lipgloss.Center, sMuted.Render(a.Address))
 	}
 	warn := ""
-	if net, _ := arc90.Lookup(m.version.GenesisID); net.Algorand && !m.uriOffline {
-		state := sMuted.Render("incentive fee ") + sDim.Render("off") + sMuted.Render(" · press ") + sKeycap.Render("f") + sMuted.Render(" to add the 2 ALGO fee that requests participation incentives")
+	if _, ok := arc90.Lookup(m.version.GenesisID); ok && !m.uriOffline {
+		state := sMuted.Render("incentive fee ") + sDim.Render("off") + sMuted.Render(" · press ") + sKeycap.Render("f") + sMuted.Render(" to add the 2 "+m.network().Unit+" fee that requests participation incentives")
 		if m.incentive {
-			state = sMuted.Render("incentive fee ") + sOK.Render("2 ALGO") + sMuted.Render(" · press ") + sKeycap.Render("f") + sMuted.Render(" to remove it")
+			state = sMuted.Render("incentive fee ") + sOK.Render("2 "+m.network().Unit) + sMuted.Render(" · press ") + sKeycap.Render("f") + sMuted.Render(" to remove it")
 		}
 		warn = lipgloss.PlaceHorizontal(w, lipgloss.Center, state) + "\n"
 	}
@@ -573,7 +573,7 @@ Generation waits up to 20 minutes. Esc on the dashboard offers to abandon the wa
 abandoning does not cancel generation inside algod.
 Read-only mode blocks all node and watch-list writes.
 QRs are signed externally: on Voi in Voi Wallet or voirewards, on Algorand in any
-wallet that supports ARC-90 keyreg URIs. On Algorand, f in the QR view adds the
-2 ALGO fee that requests participation incentives.
+wallet that supports ARC-90 keyreg URIs. f in the QR view adds the 2 VOI / 2 ALGO
+fee that requests participation incentives.
 This node holds no spending keys, mnemonics, or signing capability.
 Network errors stay in the status line; reads retry automatically. Writes do not.`

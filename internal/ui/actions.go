@@ -36,12 +36,13 @@ func (m *Model) showURI(offline, qr bool) bool {
 	}
 	net, _ := arc90.Lookup(m.version.GenesisID)
 	var fee uint64
-	if m.incentive && net.Algorand && !offline {
+	if m.incentive && !offline {
 		fee = arc90.IncentiveFee
 	}
 	uri, err := arc90.Build(m.version.GenesisID, a.Address, p, offline, fee)
 	if err != nil {
 		m.message = err.Error()
+		m.uri, m.qr = "", ""
 		return false
 	}
 	m.resetScroll()
@@ -119,11 +120,11 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 			return clipboard(m.uri)
 		}
 		if s == "f" {
-			if net, _ := arc90.Lookup(m.version.GenesisID); net.Algorand && !m.uriOffline {
+			if _, ok := arc90.Lookup(m.version.GenesisID); ok && !m.uriOffline {
 				m.incentive = !m.incentive
 				m.showURI(false, m.mode == "qr")
 				if m.incentive {
-					m.message = "Added the 2 ALGO fee that requests participation incentives; the wallet shows it before signing."
+					m.message = "Added the 2 " + m.network().Unit + " fee that requests participation incentives; the wallet shows it before signing."
 				} else {
 					m.message = "Removed the incentive fee; the wallet picks the fee."
 				}

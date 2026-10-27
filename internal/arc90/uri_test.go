@@ -44,8 +44,11 @@ func TestGolden(t *testing.T) {
 	if _, err := Build("", k.Address, k.Key, true, 0); err == nil {
 		t.Fatal("unknown network must be refused, not guessed")
 	}
-	if _, err := Build("voimain-v1.0", k.Address, k.Key, false, IncentiveFee); err == nil {
-		t.Fatal("fee must be refused on Voi")
+	if got, err := Build("voimain-v1.0", k.Address, k.Key, false, IncentiveFee); err != nil || got[len(got)-12:] != "&fee=2000000" {
+		t.Fatalf("Voi incentive fee: %q %v", got, err)
+	}
+	if _, err := Build("mainnet-v1.0", k.Address, k.Key, true, IncentiveFee); err == nil {
+		t.Fatal("a go-offline URI must refuse the fee")
 	}
 	for net, want := range map[string]string{
 		"voimain-v1.0": "voi://net:voimain-v1.0/" + k.Address + "?type=keyreg",

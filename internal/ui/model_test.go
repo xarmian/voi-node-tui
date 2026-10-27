@@ -423,7 +423,7 @@ func TestRedactDisguisesOnChainIdentifiers(t *testing.T) {
 	}
 }
 
-func TestAlgorandIncentiveFeeToggle(t *testing.T) {
+func TestIncentiveFeeToggle(t *testing.T) {
 	m := New(context.Background(), nil, accounts.Store{}, true)
 	m.version.GenesisID = "mainnet-v1.0"
 	m.rows = []row{{Account: models.Account{Address: testAddress, Status: "Offline"}}}
@@ -446,7 +446,13 @@ func TestAlgorandIncentiveFeeToggle(t *testing.T) {
 	m.version.GenesisID = "voimain-v1.0"
 	m.Update(key("enter"))
 	m.Update(key("f"))
-	if strings.Contains(m.uri, "fee=") {
-		t.Fatal("Voi must never get the Algorand incentive fee")
+	if !strings.HasPrefix(m.uri, "voi://net:voimain-v1.0/") || !strings.HasSuffix(m.uri, "&fee=2000000") || !strings.Contains(m.message, "2 VOI") {
+		t.Fatalf("Voi incentive fee: %q / %q", m.uri, m.message)
+	}
+	m.Update(key("esc"))
+	m.version.GenesisID = "private-net"
+	m.Update(key("enter"))
+	if m.uri != "" || m.mode == "qr" {
+		t.Fatalf("unknown network must leave no URI behind: %q mode %q", m.uri, m.mode)
 	}
 }

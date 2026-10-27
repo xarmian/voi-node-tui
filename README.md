@@ -120,10 +120,14 @@ keyreg URI. A key registered on the wrong chain takes that account online there
 with keys no node is voting with, so the account gets suspended for missing
 votes.
 
-**Algorand incentives.** On Algorand, press `f` in the QR view to add the
-2 ALGO fee (`fee=2000000`) that requests participation incentives on a keyreg. It
-is off by default, so you never pay it by surprise, and your wallet shows the fee
-before you sign. Voi never gets this option.
+**Incentive eligibility.** Under consensus v40 and later, both Algorand and Voi,
+a go-online keyreg that pays a 2,000,000 micro-unit fee (2 ALGO or 2 VOI) marks
+the account eligible for participation incentives. Press `f` in the QR view to add
+`fee=2000000`. Without it, the wallet picks the fee and the account isn't marked
+eligible. It's off by default so you never pay it by surprise, and your wallet
+shows the fee before you sign. Go-offline URIs never carry it. A network can be on
+v40 before it pays incentives (Voi, at the time of writing), so the fee then buys
+eligibility for future payouts.
 
 ## Keys
 
@@ -134,7 +138,7 @@ before you sign. Voi never gets this option.
 | Enter or `q` | registration QR and URI for the selected key |
 | `c` | copy the URI (OSC 52) and show it |
 | `o` | go-offline QR for the account (a keyreg with no keys) |
-| `f` | in the QR view on Algorand: toggle the incentive fee |
+| `f` | in the QR view: toggle the incentive-eligibility fee |
 | `g` | generate or renew a key; edit the round span, then confirm |
 | `a` | add an address (checksum-validated) with an optional label |
 | `d` | delete the selected key |
