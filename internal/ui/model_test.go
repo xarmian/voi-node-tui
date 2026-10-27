@@ -251,11 +251,11 @@ func TestAddRemoveAndGuardedDeleteOffer(t *testing.T) {
 	m.Update(key("a"))
 	m.input.SetValue(testAddress)
 	m.Update(key("enter"))
-	m.input.SetValue("colo")
+	m.input.SetValue("home-node")
 	_, cmd := m.Update(key("enter"))
 	m.Update(cmd())
 	xs, err := store.Load()
-	if err != nil || len(xs) != 1 || xs[0].Label != "colo" || m.mode != "offer-generate" {
+	if err != nil || len(xs) != 1 || xs[0].Label != "home-node" || m.mode != "offer-generate" {
 		t.Fatal("account add and generation offer", xs, err)
 	}
 	m.Update(key("n"))

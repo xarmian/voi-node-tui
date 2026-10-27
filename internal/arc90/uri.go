@@ -39,7 +39,7 @@ func Lookup(genesis string) (Network, bool) {
 // IncentiveFee is the keyreg fee (microAlgos) that requests Algorand participation incentives.
 const IncentiveFee = 2_000_000
 
-// Build returns the keyreg URI. Query order matches colo's show-partkey-qr; algod's
+// Build returns the keyreg URI. Query order matches Voi Swarm's show-partkey-qr; algod's
 // standard-base64 key bytes are emitted base64url without padding, as ARC-90 requires.
 // fee > 0 adds a static fee (Algorand networks only).
 func Build(genesis, address string, key models.AccountParticipation, offline bool, fee uint64) (string, error) {

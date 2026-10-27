@@ -1,6 +1,6 @@
 # voi-node-tui — spec v1
 
-An interactive terminal dashboard for a Voi (algod) participation node. It shows node state and manages participation keys. Single static Go binary, run over SSH on the node host (first target: colo, a Voi Swarm participation node).
+An interactive terminal dashboard for a Voi (algod) participation node. It shows node state and manages participation keys. Single static Go binary, run over SSH on the node host (first target: a Voi Swarm participation node).
 
 ## Stack
 
@@ -17,7 +17,7 @@ Resolution order, first match wins:
 3. `--data-dir <dir>` (or env `ALGORAND_DATA`): read `algod.net` (host:port; `[::]` → `127.0.0.1`) and `algod.admin.token`.
 4. Voi Swarm autodetect: `docker inspect voinetwork_algod` (also `voinetwork_relay`/`_developer`/`_archiver`) for the container's bridge IP; port from `/var/lib/voi/algod/data/algod.net` (port only); admin token from `/var/lib/voi/algod/data/algod.admin.token`.
 
-On colo today: the container is `voinetwork_algod` on the default bridge (172.17.0.2), algod listens on `[::]:8080` inside it, no host port is published, and `/var/lib/voi/algod/data/algod.admin.token` is readable by the login user. algod 5.0.4, genesis `voimain-v1.0`.
+On a typical Voi Swarm host: the container is `voinetwork_algod` on the default bridge (172.17.0.2), algod listens on `[::]:8080` inside it, no host port is published, and `/var/lib/voi/algod/data/algod.admin.token` is readable by the login user. algod 5.0.4, genesis `voimain-v1.0`.
 
 The admin token is required: the participation endpoints need it. Never print or log the token.
 
@@ -52,7 +52,7 @@ The node never holds spending keys in v1. Registering a key online is done by si
 
 ## ARC-90 keyreg URI
 
-Must match colo's `~/voi/bin/show-partkey-qr` exactly:
+Must match Voi Swarm's `~/voi/bin/show-partkey-qr` exactly:
 
 ```
 voi://net:<net-label>/<address>?type=keyreg&votekey=<b64url>&selkey=<b64url>[&sprfkey=<b64url>]&votefst=<first>&votelst=<last>&votekd=<dilution>
