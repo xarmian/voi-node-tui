@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/xarmian/voi-node-tui/internal/accounts"
-	"github.com/xarmian/voi-node-tui/internal/algod"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,6 +11,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/xarmian/voi-node-tui/internal/accounts"
+	"github.com/xarmian/voi-node-tui/internal/algod"
 )
 
 const testAddress = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ"
@@ -162,5 +164,123 @@ func TestOfflineQRHasNoKeys(t *testing.T) {
 	want := "voi://net:voimain-v1.0/" + testAddress + "?type=keyreg"
 	if m.uri != want || !strings.Contains(m.View(), "WARNING") {
 		t.Fatal("offline URI or visible fallback warning missing")
+	}
+}
+
+func TestDeleteRechecksOnlineRegistration(t *testing.T) {
+	pk := algod.ParticipationKey{Id: "guarded", Address: testAddress, Key: models.AccountParticipation{VoteParticipationKey: []byte{1}}}
+	deletes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "GET" && r.URL.Path == "/v2/accounts/"+testAddress {
+			json.NewEncoder(w).Encode(models.Account{Address: testAddress, Status: "Online", Participation: pk.Key})
+			return
+		}
+		if r.Method == "DELETE" {
+			deletes++
+			fmt.Fprint(w, `{}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer srv.Close()
+	c, err := algod.New(algod.Connection{URL: srv.URL, Token: "fake"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(context.Background(), c, accounts.Store{}, false)
+	m.rows = []row{{Account: models.Account{Address: testAddress, Status: "Offline"}}}
+	m.keys = []algod.ParticipationKey{pk}
+	m.Update(key("d"))
+	_, cmd := m.Update(key("y"))
+	if cmd == nil {
+		t.Fatal("no guarded delete command")
+	}
+	m.Update(cmd())
+	if deletes != 0 || !strings.Contains(m.message, "full address") {
+		t.Fatal("stale Offline snapshot bypassed guard")
+	}
+	m.rows[0].Account.Status = "Online"
+	m.rows[0].Account.Participation = pk.Key
+	m.Update(key("d"))
+	m.input.SetValue("y")
+	_, cmd = m.Update(key("enter"))
+	if cmd != nil || deletes != 0 {
+		t.Fatal("short confirmation accepted")
+	}
+	m.input.SetValue(testAddress)
+	_, cmd = m.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("full address refused")
+	}
+	m.Update(cmd())
+	if deletes != 1 {
+		t.Fatal("confirmed deletion did not happen")
+	}
+}
+
+func TestAddRemoveAndGuardedDeleteOffer(t *testing.T) {
+	c, err := algod.New(algod.Connection{URL: "http://127.0.0.1:1", Token: "fake"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := accounts.Store{Path: filepath.Join(t.TempDir(), "accounts.json")}
+	m := New(context.Background(), c, store, false)
+	m.Update(key("a"))
+	m.input.SetValue(testAddress)
+	m.Update(key("enter"))
+	m.input.SetValue("colo")
+	_, cmd := m.Update(key("enter"))
+	m.Update(cmd())
+	xs, err := store.Load()
+	if err != nil || len(xs) != 1 || xs[0].Label != "colo" || m.mode != "offer-generate" {
+		t.Fatal("account add and generation offer", xs, err)
+	}
+	m.Update(key("n"))
+	pk := algod.ParticipationKey{Id: "registered", Address: testAddress, Key: models.AccountParticipation{VoteParticipationKey: []byte{1}}}
+	m.rows = []row{{Account: models.Account{Address: testAddress, Status: "Online", Participation: pk.Key}}}
+	m.keys = []algod.ParticipationKey{pk}
+	m.Update(key("r"))
+	_, cmd = m.Update(key("y"))
+	m.Update(cmd())
+	xs, err = store.Load()
+	if err != nil || len(xs) != 0 || m.mode != "remove-keys" {
+		t.Fatal("remove offer", err)
+	}
+	m.Update(key("y"))
+	if m.mode != "delete-address" {
+		t.Fatal("registered key removal bypassed guard")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != "" || len(m.removalKeys) != 0 {
+		t.Fatal("delete queue not cancelled")
+	}
+}
+
+func TestLiveRoundsEstimateAndRetry(t *testing.T) {
+	c, err := algod.New(algod.Connection{URL: "http://127.0.0.1:1", Token: "fake"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(context.Background(), c, accounts.Store{}, true)
+	now := time.Now()
+	for i := 0; i < 4; i++ {
+		m.Update(blockMsg{status: models.NodeStatus{LastRound: uint64(100 + i)}, at: now.Add(time.Duration(i) * 2 * time.Second)})
+	}
+	if m.average != 2*time.Second || len(m.samples) != 3 {
+		t.Fatalf("block average %s (%d samples)", m.average, len(m.samples))
+	}
+	before := m.status.LastRound
+	m.Update(refreshMsg{status: &models.NodeStatus{LastRound: 50}, at: now})
+	if m.status.LastRound != before {
+		t.Fatal("stale refresh moved round backwards")
+	}
+	m.Update(blockMsg{err: fmt.Errorf("temporary failure")})
+	if !strings.Contains(m.View(), "temporary failure") {
+		t.Fatal("missing network error")
+	}
+	_, cmd := m.Update(waitAgainMsg{})
+	if cmd == nil {
+		t.Fatal("long poll did not retry")
 	}
 }
