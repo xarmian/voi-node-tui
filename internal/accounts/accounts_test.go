@@ -73,6 +73,25 @@ func TestDeleteGuard(t *testing.T) {
 	if CanDelete(a, k, "y") != nil || CanDelete(a, k, "") == nil {
 		t.Fatal("ordinary confirmation")
 	}
+	for _, tc := range []struct {
+		name   string
+		status string
+		vote   []byte
+	}{
+		{"now offline", "Offline", k.Key.VoteParticipationKey},
+		{"now registered to another key", "Online", []byte{2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a.Status = tc.status
+			a.Participation.VoteParticipationKey = tc.vote
+			if err := CanDelete(a, k, address); err != nil {
+				t.Fatalf("full address refused after registration changed: %v", err)
+			}
+			if CanDelete(a, k, "wrong address") == nil {
+				t.Fatal("incorrect address accepted")
+			}
+		})
+	}
 }
 func TestWatchList(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config", "accounts.json")

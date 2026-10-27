@@ -93,7 +93,7 @@ func CanDelete(a models.Account, k algod.ParticipationKey, confirmation string) 
 		}
 		return nil
 	}
-	if confirmation != "y" && confirmation != "Y" {
+	if confirmation != "y" && confirmation != "Y" && confirmation != a.Address {
 		return errors.New("deletion requires y confirmation")
 	}
 	return nil
