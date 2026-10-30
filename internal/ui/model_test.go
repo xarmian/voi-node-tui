@@ -177,11 +177,17 @@ func TestOfflineQRHasNoKeys(t *testing.T) {
 	if want := "voi://net:voimain-v1.0/" + testAddress + "?type=keyreg"; m.uri != want {
 		t.Fatalf("offline URI %q; want %q", m.uri, want)
 	}
+	if m.message != OfflineWalletWarning || !strings.Contains(m.qrView(120, 200), "permanently non-participating") {
+		t.Fatalf("a Voi go-offline QR must carry the 0.1.x wallet warning: message %q", m.message)
+	}
 	m.Update(key("esc"))
 	m.version.GenesisID = "mainnet-v1.0"
 	m.Update(key("o"))
 	if want := "algorand://" + testAddress + "?type=keyreg"; m.uri != want {
 		t.Fatalf("algorand offline URI %q; want %q", m.uri, want)
+	}
+	if m.message == OfflineWalletWarning {
+		t.Fatal("the Voi Wallet warning is for Voi networks only")
 	}
 	m.Update(key("f"))
 	if strings.Contains(m.uri, "fee=") {
@@ -437,6 +443,9 @@ func TestIncentiveFeeToggle(t *testing.T) {
 	m.Update(key("f"))
 	if !strings.HasSuffix(m.uri, "&fee=2000000") || m.mode != "qr" {
 		t.Fatalf("fee not added: %q mode %q", m.uri, m.mode)
+	}
+	if m.message == OfflineWalletWarning {
+		t.Fatal("the Voi Wallet warning is for Voi networks only")
 	}
 	m.Update(key("f"))
 	if strings.Contains(m.uri, "fee=") {
