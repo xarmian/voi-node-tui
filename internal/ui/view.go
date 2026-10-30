@@ -236,6 +236,9 @@ func (m *Model) qrView(w, avail int) string {
 		}
 		warn = lipgloss.PlaceHorizontal(w, lipgloss.Center, state) + "\n"
 	}
+	if m.uriOffline && m.network().Unit == "VOI" {
+		warn = lipgloss.PlaceHorizontal(w, lipgloss.Center, sBad.Bold(true).Render(ansi.Wordwrap(OfflineWalletWarning, w-4, " "))) + "\n"
+	}
 	uri := sDim.Render(ansi.Hardwrap(m.uri, w, false))
 	if m.qr == "" {
 		return "\n" + head + "\n" + warn + "\n" + uri + "\n"

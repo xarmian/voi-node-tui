@@ -63,9 +63,18 @@ func (m *Model) showURI(offline, qr bool) bool {
 	}
 	if offline {
 		m.message = "Offline keyreg: signing this URI marks the account Offline."
+		if net.Unit == "VOI" {
+			m.message = OfflineWalletWarning
+		}
 	}
 	return true
 }
+
+// OfflineWalletWarning is temporary (TASK-439, 10-30): Voi Wallet 0.1.x signs any offline
+// keyreg URI with nonParticipation set, which permanently stops the account from ever going
+// online again. 0.2.0 fixes it; remove this once 0.2.0 is the store version.
+const OfflineWalletWarning = "WARNING: Voi Wallet 0.1.x marks the account permanently non-participating when it signs this. Use another ARC-90 wallet or wait for Voi Wallet 0.2.0."
+
 func (m *Model) beginGenerate() tea.Cmd {
 	if m.pending != nil {
 		m.message = "Generation is already pending; press Esc on the dashboard to abandon the wait."
